@@ -37,6 +37,8 @@ import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import groovyx.gpars.GParsConfig
 import groovyx.gpars.dataflow.operator.DataflowProcessor
+import nextflow.dag.DAG
+import nextflow.trace.DagObserver
 import nextflow.exception.MissingLibraryException
 import nextflow.processor.TaskDispatcher
 import nextflow.processor.TaskFault
@@ -113,6 +115,8 @@ class Session implements ISession {
      * The unique identifier of this session
      */
     private UUID uniqueId
+
+    private DAG dag
 
     private Barrier processesBarrier = new Barrier()
 
@@ -233,6 +237,8 @@ class Session implements ISession {
      */
     void init( Path scriptPath ) {
 
+        this.dag = new DAG()
+
         this.workDir = ((config.workDir ?: 'work') as Path).complete()
         this.setLibDir( config.libDir as String )
 
@@ -260,6 +266,7 @@ class Session implements ISession {
         createTraceFileObserver(result)
         createTimelineObserver(result)
         createExtraeObserver(result)
+        createDagObserver(result)
 
         return result
     }
@@ -289,6 +296,17 @@ class Session implements ISession {
             if( !fileName ) fileName = TimelineObserver.DEF_FILE_NAME
             def traceFile = (fileName as Path).complete()
             def observer = new TimelineObserver(traceFile)
+            result << observer
+        }
+    }
+
+    protected void createDagObserver(Collection<TraceObserver> result) {
+        Boolean isEnabled = config.navigate('dag.enabled') as Boolean
+        if( isEnabled ) {
+            String fileName = config.navigate('dag.file')
+            if( !fileName ) fileName = DagObserver.DEF_FILE_NAME
+            def traceFile = (fileName as Path).complete()
+            def observer = new DagObserver(traceFile)
             result << observer
         }
     }
@@ -497,6 +515,8 @@ class Session implements ISession {
         for( TraceObserver it : observers ) { it.onProcessDestroy(process) }
         processesBarrier.arrive(process)
     }
+
+    DAG getDag() { this.dag }
 
     def ExecutorService getExecService() { execService }
 
