@@ -29,7 +29,6 @@ import groovy.lang.MetaClass;
 import groovy.lang.MetaClassRegistry;
 import groovyx.gpars.dataflow.DataflowQueue;
 import groovyx.gpars.dataflow.DataflowVariable;
-import groovyx.gpars.dataflow.operator.DataflowOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,10 +65,6 @@ public class CustomMetaClassCreationHandle extends MetaClassRegistry.MetaClassCr
         else if (isSplitterClass(theClass)) {
             log.trace("Registering custom meta-class for: {}", theClass);
             return new NextflowDelegatingMetaClass(metaClass);
-        }
-        else if (DataflowOperator.class.equals(theClass)) {
-            log.trace("Registering custom meta-class for: {}", theClass);
-            return new DataflowOperatorDelegatingMetaClass(metaClass);
         }
 
         return metaClass;

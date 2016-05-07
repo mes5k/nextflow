@@ -38,7 +38,10 @@ import groovy.util.logging.Slf4j
 import groovyx.gpars.GParsConfig
 import groovyx.gpars.dataflow.operator.DataflowProcessor
 import nextflow.dag.DAG
-import nextflow.trace.DagObserver
+import nextflow.dag.GraphObserver
+import nextflow.dag.VertexHandler
+import nextflow.processor.TaskHandler
+import nextflow.dag.GraphRenderObserver
 import nextflow.exception.MissingLibraryException
 import nextflow.processor.TaskDispatcher
 import nextflow.processor.TaskFault
@@ -138,7 +141,9 @@ class Session implements ISession {
 
     private int poolSize
 
-    private Queue<TraceObserver> observers
+    private Queue<TraceObserver> traceObservers = new ConcurrentLinkedQueue()
+
+    private Queue<GraphObserver> graphObservers = new ConcurrentLinkedQueue()
 
     private boolean statsEnabled
 
@@ -249,8 +254,8 @@ class Session implements ISession {
             this.setScriptName(scriptPath.name)
         }
 
-        this.observers = createObservers()
-        this.statsEnabled = observers.size()>0
+        createObservers()
+        statsEnabled = traceObservers.size()>0
     }
 
     /**
@@ -260,61 +265,60 @@ class Session implements ISession {
      * @return A list of {@link TraceObserver} objects or an empty list
      */
     @PackageScope
-    Queue createObservers() {
-        def result = new ConcurrentLinkedQueue()
+    void createObservers() {
 
-        createTraceFileObserver(result)
-        createTimelineObserver(result)
-        createExtraeObserver(result)
-        createDagObserver(result)
+        addObserver createTraceFileObserver()
+        addObserver createTimelineObserver()
+        addObserver createExtraeObserver()
+        addObserver createDagObserver()
 
-        return result
     }
 
     /**
      * create the Extrae trace observer
      */
-    protected void createExtraeObserver(Collection<TraceObserver> result) {
+    protected createExtraeObserver() {
         Boolean isEnabled = config.navigate('extrae.enabled') as Boolean
         if( isEnabled ) {
             try {
-                result << (TraceObserver)Class.forName(EXTRAE_TRACE_CLASS).newInstance()
+                return Class.forName(EXTRAE_TRACE_CLASS).newInstance()
             }
             catch( Exception e ) {
                 log.warn("Unable to load Extrae profiler",e)
             }
         }
+        return null
     }
 
     /**
      * Create timeline report file observer
      */
-    protected void createTimelineObserver(Collection<TraceObserver> result) {
+    protected createTimelineObserver() {
         Boolean isEnabled = config.navigate('timeline.enabled') as Boolean
         if( isEnabled ) {
             String fileName = config.navigate('timeline.file')
             if( !fileName ) fileName = TimelineObserver.DEF_FILE_NAME
             def traceFile = (fileName as Path).complete()
-            def observer = new TimelineObserver(traceFile)
-            result << observer
+            return new TimelineObserver(traceFile)
         }
+        return null
     }
 
-    protected void createDagObserver(Collection<TraceObserver> result) {
+    protected createDagObserver() {
         Boolean isEnabled = config.navigate('dag.enabled') as Boolean
         if( isEnabled ) {
             String fileName = config.navigate('dag.file')
-            if( !fileName ) fileName = DagObserver.DEF_FILE_NAME
+            if( !fileName ) fileName = GraphRenderObserver.DEF_FILE_NAME
             def traceFile = (fileName as Path).complete()
-            def observer = new DagObserver(traceFile)
-            result << observer
+            return new GraphRenderObserver(traceFile)
         }
+        return null
     }
 
     /*
      * create the execution trace observer
      */
-    protected void createTraceFileObserver(Collection<TraceObserver> result) {
+    protected createTraceFileObserver() {
         Boolean isEnabled = config.navigate('trace.enabled') as Boolean
         if( isEnabled ) {
             String fileName = config.navigate('trace.file')
@@ -324,21 +328,21 @@ class Session implements ISession {
             config.navigate('trace.raw') { it -> observer.useRawNumbers(it == true) }
             config.navigate('trace.sep') { observer.separator = it }
             config.navigate('trace.fields') { observer.setFieldsAndFormats(it) }
-            result << observer
+            return(observer)
         }
+        return null
+    }
+
+    private void addObserver(observer) {
+        if( observer instanceof TraceObserver )
+            traceObservers << (TraceObserver)observer
+
+        if( observer instanceof GraphObserver )
+            graphObservers << (GraphObserver)observer
     }
 
     def Session start() {
         log.debug "Session start invoked"
-
-        /*
-         * - register all of them in the dispatcher class
-         * - register the onComplete event
-         */
-        observers.each { trace ->
-            log.debug "Registering observer: ${trace.class.name}"
-            dispatcher.register(trace)
-        }
 
         // register shut-down cleanup hooks
         Global.onShutdown { cleanUp() }
@@ -347,7 +351,7 @@ class Session implements ISession {
         // signal start to tasks dispatcher
         dispatcher.start()
         // signal start to trace observers
-        observers.each { trace -> trace.onFlowStart(this) }
+        traceObservers.each { trace -> trace.onFlowStart(this) }
 
         return this
     }
@@ -461,8 +465,8 @@ class Session implements ISession {
         }
 
         // -- invoke observers completion handlers
-        while( observers.size() ) {
-            def trace = observers.poll()
+        while( traceObservers.size() ) {
+            def trace = traceObservers.poll()
             try {
                 if( trace )
                     trace.onFlowComplete()
@@ -504,31 +508,86 @@ class Session implements ISession {
 
     boolean isAborted() { aborted }
 
-    def void taskRegister(TaskProcessor process) {
+    void processRegister(TaskProcessor process) {
         log.debug ">>> barrier register (process: ${process.name})"
         processesBarrier.register(process)
-        for( TraceObserver it : observers ) { it.onProcessCreate(process) }
     }
 
-    def void taskDeregister(TaskProcessor process) {
+    void processDeregister(TaskProcessor process) {
         log.debug "<<< barrier arrive (process: ${process.name})"
-        for( TraceObserver it : observers ) { it.onProcessDestroy(process) }
         processesBarrier.arrive(process)
     }
 
     DAG getDag() { this.dag }
 
-    def ExecutorService getExecService() { execService }
+    ExecutorService getExecService() { execService }
 
     /**
      * Register a shutdown hook to close services when the session terminates
      * @param Closure
      */
-    def void onShutdown( Closure shutdown ) {
+    void onShutdown( Closure shutdown ) {
         if( !shutdown )
             return
 
         shutdownCallbacks << shutdown
+    }
+
+    void notifyProcessCreate(TaskProcessor process) {
+        for( TraceObserver it : traceObservers ) {
+            it.onProcessCreate(process)
+        }
+    }
+
+    void notifyNewVertex( VertexHandler handler ) {
+        for( GraphObserver it : graphObservers ) {
+            it.onNewVertex(handler)
+        }
+    }
+
+    /**
+     * Notifies that a task has been submitted
+     */
+    void notifyTaskSubmit( TaskHandler handler ) {
+        for( TraceObserver it : traceObservers ) {
+            try {
+                it.onProcessSubmit(handler)
+            }
+            catch( Exception e ) {
+                log.error(e.getMessage(), e)
+            }
+        }
+    }
+
+    /**
+     * Notifies task start event
+     */
+    void notifyTaskStart( TaskHandler handler ) {
+        for( TraceObserver it : traceObservers ) {
+            try {
+                it.onProcessStart(handler)
+            }
+            catch( Exception e ) {
+                log.error(e.getMessage(), e)
+            }
+        }
+    }
+
+    /**
+     * Notifies task termination event
+     *
+     * @param handler
+     */
+    void notifyTaskComplete( TaskHandler handler ) {
+        // notify the event to the observers
+        for( TraceObserver it : traceObservers ) {
+            try {
+                it.onProcessComplete(handler)
+            }
+            catch( Exception e ) {
+                log.error(e.getMessage(), e)
+            }
+        }
     }
 
     @Memoized

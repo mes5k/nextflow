@@ -168,7 +168,7 @@ class SplitterFactory {
         // set the splitter strategy options
         strategy.options(opts)
 
-        DataflowExtensions.subscribe ( source, [
+        DataflowExtensions.subscribeImpl ( source, [
                 onNext: { entry -> strategy.target(entry).apply() },
                 onComplete: { resultChannel << Channel.STOP }
         ] )
@@ -203,7 +203,7 @@ class SplitterFactory {
             strategy.target(entry).apply()
         }
 
-        DataflowExtensions.subscribe ( source, [onNext: splitEntry, onComplete: { result.bind(count) }] )
+        DataflowExtensions.subscribeImpl ( source, [onNext: splitEntry, onComplete: { result.bind(count) }] )
 
         // return the resulting channel
         return result

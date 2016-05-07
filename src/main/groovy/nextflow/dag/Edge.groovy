@@ -8,31 +8,33 @@ import groovy.transform.CompileStatic
 class Edge {
 
     // the channel instance
-    def instance;
+    def instance
 
-    Vertex from;
+    Vertex from
 
-    Vertex to;
+    Vertex to
+
+    String label
 
 
     String toString() {
         assert from != null || to != null
 
         def result = new StringBuilder()
-        def A = renderNode(from, result)
-        def B = renderNode(to, result)
+        def A = renderVertex(from, result)
+        def B = renderVertex(to, result)
         result << "$A -> $B;"
 
     }
 
-    private String renderNode( Vertex vertex, StringBuilder result ) {
+    private String renderVertex( Vertex vertex, StringBuilder result ) {
         def label
         if( !vertex ) {
             label = "_${Integer.toHexString(instance.hashCode())}"
             result << "${label} [shape=point];\n"
         }
         else {
-            label = "_${Integer.toHexString(vertex.instance.hashCode())}"
+            label = "p${vertex.index}"
         }
         return label
     }

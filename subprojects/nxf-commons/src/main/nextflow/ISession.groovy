@@ -19,11 +19,7 @@
  */
 
 package nextflow
-
 import java.nio.file.Path
-
-import nextflow.dag.DAG
-
 /**
  * Nextflow session interface
  *
@@ -69,7 +65,5 @@ interface ISession {
     boolean isCacheable()
 
     boolean isResumeMode()
-
-    DAG getDag()
 
 }
