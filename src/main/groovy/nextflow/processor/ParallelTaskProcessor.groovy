@@ -119,7 +119,7 @@ class ParallelTaskProcessor extends TaskProcessor {
         session.allProcessors << (processor = new DataflowOperator(group, params, wrapper))
 
         // notify the creation of a new vertex the execution DAG
-        session.notifyNewVertex( GraphEvent.newProcess(name, processor, config.getInputs(), config.getOutputs()) )
+        session.notifyNewVertex( GraphEvent.newProcess(name, config.getInputs(), config.getOutputs()) )
 
         // fix issue #41
         processor.start()
