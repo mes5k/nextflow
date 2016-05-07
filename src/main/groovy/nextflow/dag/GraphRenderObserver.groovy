@@ -36,7 +36,7 @@ class GraphRenderObserver implements TraceObserver, GraphObserver {
 
     @Override
     void onFlowComplete() {
-        dotFile.text = dag.toString()
+        dotFile.text = dag.render()
         // run graphviz to render the graph
         def cmd = "command -v dot &>/dev/null  && dot -Tpng ${dotFile} > ${pngFile}"
         log.debug "Render graph cmd: `cmd`"
@@ -46,7 +46,7 @@ class GraphRenderObserver implements TraceObserver, GraphObserver {
 
 
     @Override
-    void onNewVertex(VertexHandler handler) {
+    void onNewVertex(GraphEvent handler) {
         dag.addVertex(handler)
     }
 

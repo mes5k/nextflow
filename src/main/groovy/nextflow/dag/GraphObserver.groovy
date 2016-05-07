@@ -9,6 +9,6 @@ import groovy.transform.CompileStatic
 @CompileStatic
 interface GraphObserver {
 
-    void onNewVertex( VertexHandler handler )
+    void onNewVertex( GraphEvent handler )
 
 }

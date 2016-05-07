@@ -29,7 +29,7 @@ import groovyx.gpars.dataflow.operator.DataflowOperator
 import groovyx.gpars.dataflow.operator.DataflowProcessor
 import groovyx.gpars.dataflow.operator.PoisonPill
 import nextflow.Channel
-import nextflow.dag.VertexHandler
+import nextflow.dag.GraphEvent
 import nextflow.script.EachInParam
 /**
  * Defines the parallel tasks execution logic
@@ -119,7 +119,7 @@ class ParallelTaskProcessor extends TaskProcessor {
         session.allProcessors << (processor = new DataflowOperator(group, params, wrapper))
 
         // notify the creation of a new vertex the execution DAG
-        session.notifyNewVertex( VertexHandler.newProcess(name, processor, config.getInputs(), config.getOutputs()) )
+        session.notifyNewVertex( GraphEvent.newProcess(name, processor, config.getInputs(), config.getOutputs()) )
 
         // fix issue #41
         processor.start()

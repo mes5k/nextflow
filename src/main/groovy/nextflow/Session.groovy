@@ -39,7 +39,7 @@ import groovyx.gpars.GParsConfig
 import groovyx.gpars.dataflow.operator.DataflowProcessor
 import nextflow.dag.DAG
 import nextflow.dag.GraphObserver
-import nextflow.dag.VertexHandler
+import nextflow.dag.GraphEvent
 import nextflow.processor.TaskHandler
 import nextflow.dag.GraphRenderObserver
 import nextflow.exception.MissingLibraryException
@@ -242,7 +242,7 @@ class Session implements ISession {
      */
     void init( Path scriptPath ) {
 
-        this.dag = new DAG()
+        this.dag = new DAG(session:this)
 
         this.workDir = ((config.workDir ?: 'work') as Path).complete()
         this.setLibDir( config.libDir as String )
@@ -539,7 +539,7 @@ class Session implements ISession {
         }
     }
 
-    void notifyNewVertex( VertexHandler handler ) {
+    void notifyNewVertex( GraphEvent handler ) {
         for( GraphObserver it : graphObservers ) {
             it.onNewVertex(handler)
         }

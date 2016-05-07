@@ -13,42 +13,38 @@ import nextflow.script.OutputsList
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
 @CompileStatic
-class VertexHandler {
+class GraphEvent {
 
-    Object instance
+    String label
 
     List<ChannelHandler> inbounds
 
     List<ChannelHandler> outbounds
 
-    String label
+    DAG.VertexType type
 
-    VertexType type
-
-    protected VertexHandler() {
+    protected GraphEvent() {
 
     }
 
-    static VertexHandler newProcess(String label, def instance, InputsList inputs, OutputsList outputs) {
-        new VertexHandler(
-                instance: instance,
+    static GraphEvent newProcess(String label, def instance, InputsList inputs, OutputsList outputs) {
+        new GraphEvent(
+                label: label,
                 inbounds: inputs.collect { InParam p -> new ChannelHandler(label: p.name, instance: p.inChannel) },
                 outbounds: outputs.collect { OutParam p -> new ChannelHandler(label: p.name, instance: p.outChannel) },
-                label: label,
-                type: VertexType.PROCESS )
+                type: DAG.VertexType.PROCESS )
     }
 
-    static VertexHandler newOperator(String label, def instance, def inputs, def outputs) {
+    static GraphEvent newOperator(String label, def instance, def inputs, def outputs) {
 
-        new VertexHandler(
-                instance: instance,
+        new GraphEvent(
+                label: label,
                 inbounds: normalize(inputs),
                 outbounds: normalize(outputs),
-                label: label,
-                type: VertexType.OPERATOR )
+                type: DAG.VertexType.OPERATOR )
     }
 
-    static VertexHandler newOperator(String label, def instance, Map<String, Object> params ) {
+    static GraphEvent newOperator(String label, def instance, Map<String, Object> params ) {
         newOperator(label,instance, extractInputs(params), extractOutputs(params))
     }
 

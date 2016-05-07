@@ -45,7 +45,7 @@ import groovyx.gpars.dataflow.operator.SeparationClosure
 import nextflow.Channel
 import nextflow.Global
 import nextflow.Session
-import nextflow.dag.VertexHandler
+import nextflow.dag.GraphEvent
 import org.codehaus.groovy.runtime.callsite.BooleanReturningMethodInvoker
 import org.codehaus.groovy.runtime.typehandling.DefaultTypeTransformation
 /**
@@ -215,7 +215,7 @@ class DataflowExtensions {
     }
 
     static private void register( String label, DataflowProcessor operator, def input, def output=null ) {
-        session?.notifyNewVertex( VertexHandler.newOperator(label, operator, input, output) )
+        session?.notifyNewVertex( GraphEvent.newOperator(label, operator, input, output) )
     }
 
 
