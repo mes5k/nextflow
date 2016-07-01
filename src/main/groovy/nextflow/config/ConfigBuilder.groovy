@@ -385,6 +385,15 @@ class ConfigBuilder {
                 config.timeline.file = cmdRun.withTimeline
         }
 
+        // -- sets broadcast server options
+        if( cmdRun.withBroadcast ) {
+            if( !(config.broadcast instanceof Map) )
+                config.broadcast = [:]
+            config.broadcast.enabled = true
+            if( !config.broadcast.file )
+                config.broadcast.file = cmdRun.withBroadcast
+        }
+
         // -- sets DAG report options
         if( cmdRun.withDag ) {
             if( !(config.dag instanceof Map) )

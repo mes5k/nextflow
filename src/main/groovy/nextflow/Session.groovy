@@ -45,6 +45,7 @@ import nextflow.processor.TaskHandler
 import nextflow.processor.TaskProcessor
 import nextflow.script.ScriptBinding
 import nextflow.trace.TimelineObserver
+import nextflow.trace.BroadcastObserver
 import nextflow.trace.TraceFileObserver
 import nextflow.trace.TraceObserver
 import nextflow.util.Barrier
@@ -266,6 +267,7 @@ class Session implements ISession {
         createTimelineObserver(result)
         createExtraeObserver(result)
         createDagObserver(result)
+        createBroadcastObserver(result)
 
         return result
     }
@@ -295,6 +297,17 @@ class Session implements ISession {
             if( !fileName ) fileName = TimelineObserver.DEF_FILE_NAME
             def traceFile = (fileName as Path).complete()
             def observer = new TimelineObserver(traceFile)
+            result << observer
+        }
+    }
+
+    /**
+     * Create broadcast observer
+     */
+    protected void createBroadcastObserver(Collection<TraceObserver> result) {
+        Boolean isEnabled = config.navigate('broadcast.enabled') as Boolean
+        if( isEnabled ) {
+            def observer = new BroadcastObserver()
             result << observer
         }
     }

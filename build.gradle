@@ -131,6 +131,7 @@ dependencies {
         exclude group: 'commons-logging', module: 'commons-logging'
         exclude group: 'org.apache.tika', module: 'tika-core'
     }
+    compile('com.corundumstudio.socketio:netty-socketio:1.7.7')
 
     // include Ivy at runtime in order to have Grape @Grab work correctly
     runtime "org.apache.ivy:ivy:2.3.0"

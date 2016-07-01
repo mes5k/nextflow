@@ -126,6 +126,9 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names = ['-with-timeline'], description = 'Create processes execution timeline file')
     String withTimeline
 
+    @Parameter(names = ['-with-broadcast'], description = 'Create a trace event broadcast server')
+    String withBroadcast
+
     @Parameter(names = '-with-docker', description = 'Enable process execution in a Docker container')
     def withDocker
 
@@ -166,6 +169,7 @@ class CmdRun extends CmdBase implements HubOptions {
 
 
         log.info "N E X T F L O W  ~  version ${Const.APP_VER}"
+        log.info "with broadcast: ${withBroadcast}"
 
         // -- specify the arguments
         def scriptArgs = (args?.size()>1 ? args[1..-1] : []) as List<String>
