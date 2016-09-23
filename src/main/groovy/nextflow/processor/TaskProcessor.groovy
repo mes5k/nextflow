@@ -199,6 +199,12 @@ class TaskProcessor {
     protected Grengine grengine
 
     /**
+     * A string that contains the task input names along with
+     * their hash values for use in TraceRecords
+     */
+    private String inputHashesTrace
+
+    /**
      * Process ID number. The first is 1, the second 2 and so on ..
      */
     private final int id
@@ -1770,21 +1776,23 @@ class TaskProcessor {
 
         final mode = config.getHashMode()
         final hash = CacheHelper.hasher(keys, mode).hash()
+        generateInputHashesTraceString(task, keys, mode, hash)
         if( log.isTraceEnabled() ) {
-            traceInputsHashes(task, keys, mode, hash)
+            log.trace "[${task.name}] cache hash: ${hash}; ${inputHashesTrace}"
         }
+
         return hash
     }
 
-    private void traceInputsHashes( TaskRun task, List entries, CacheHelper.HashMode mode, hash ) {
+    private String generateInputHashesTraceString( TaskRun task, List entries, CacheHelper.HashMode mode, hash ) {
 
         def buffer = new StringBuilder()
-        buffer.append("[${task.name}] cache hash: ${hash}; mode: $mode; entries: \n")
+        buffer.append("mode: $mode; entries: \n")
         for( Object item : entries ) {
             buffer.append( "  ${CacheHelper.hasher(item, mode).hash()} [${item?.class?.name}] $item \n")
         }
 
-        log.trace(buffer.toString())
+        inputHashesTrace = buffer.toString()
     }
 
     final protected Map<String,Object> getTaskGlobalVars(TaskRun task) {
@@ -1962,6 +1970,10 @@ class TaskProcessor {
     def warn( String message ) {
         log.warn "Process `$name` $message"
         return null
+    }
+
+    protected String getInputHashesTrace() {
+        return "input hash ${inputHashesTrace}"
     }
 
 

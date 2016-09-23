@@ -150,6 +150,7 @@ public abstract class TaskHandler {
         record.submit = this.submitTimeMillis
         record.start = this.startTimeMillis
         record.process = task.processor.getName()
+        record.input_hashes = task.processor.getInputHashesTrace()
         record.tag = task.config.tag
         record.module = task.config.module
         record.container = task.container

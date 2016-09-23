@@ -87,7 +87,8 @@ class TraceRecord implements Serializable {
             attempt:    'num',
             workdir:    'str',
             script:     'str',
-            scratch:    'str'
+            scratch:    'str',
+            input_hashes: 'str'
     ]
 
     static public Map<String,Closure<String>> FORMATTER = [
