@@ -55,9 +55,12 @@ import nextflow.util.Barrier
 import nextflow.util.ConfigHelper
 import nextflow.util.Duration
 import nextflow.util.HistoryFile
+import nextflow.util.LoggerHelper
 import nextflow.util.NameGenerator
 import sun.misc.Signal
 import sun.misc.SignalHandler
+import org.slf4j.Marker;
+import org.slf4j.MarkerFactory;
 
 /**
  * Holds the information on the current execution
@@ -168,6 +171,8 @@ class Session implements ISession {
 
     boolean getDumpHashes() { dumpHashes }
 
+    static Marker hashMarker = MarkerFactory.getMarker('hashes')
+
     TaskFault getFault() { fault }
 
     /**
@@ -264,6 +269,10 @@ class Session implements ISession {
 
         // -- DGA object
         this.dag = new DAG(session:this)
+
+        if (this.dumpHashes) {
+            LoggerHelper.addMarkerLogger(this.hashMarker)
+        }
     }
 
     /**

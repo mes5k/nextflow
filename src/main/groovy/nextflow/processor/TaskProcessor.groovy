@@ -242,14 +242,13 @@ class TaskProcessor {
         this.config = config
         this.taskBody = taskBody
         this.name = name
-
     }
 
     /**
      * @return The processor unique id
      */
     int getId() { id }
-  
+
     /**
      * @return The {@code TaskConfig} object holding the task configuration properties
      */
@@ -1817,7 +1816,7 @@ class TaskProcessor {
             buffer.append( "  ${CacheHelper.hasher(item, mode).hash()} [${item?.class?.name}] $item \n")
         }
 
-        log.info(LoggerHelper.hashMarker, buffer.toString())
+        log.info(Session.hashMarker, buffer.toString())
     }
 
     final protected Map<String,Object> getTaskGlobalVars(TaskRun task) {

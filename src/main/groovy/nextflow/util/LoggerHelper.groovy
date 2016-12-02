@@ -70,8 +70,6 @@ class LoggerHelper {
 
     static private String logFileName
 
-    static private String hashFileName = 'hashes'
-
     private CliOptions opts
 
     private boolean rolling = false
@@ -90,11 +88,6 @@ class LoggerHelper {
 
     private FileAppender fileAppender
 
-    private FileAppender hashAppender
-
-    public static final String hashMarkerString = "HASHES"
-
-    public static final Marker hashMarker = MarkerFactory.getMarker(hashMarkerString)
 
     LoggerHelper setRolling( boolean value ) {
         this.rolling = value
@@ -124,9 +117,6 @@ class LoggerHelper {
     void setup() {
         logFileName = opts.logFile
 
-        def hashFilter = new MarkerLoggerFilter()
-        hashFilter.start()
-
         final boolean quiet = opts.quiet
         final List<String> debugConf = opts.debug ?: new ArrayList<String>()
         final List<String> traceConf = opts.trace ?: ( System.getenv('NXF_TRACE')?.tokenize(', ') ?: new ArrayList<String>())
@@ -150,11 +140,8 @@ class LoggerHelper {
         this.consoleAppender = createConsoleAppender()
 
         // -- the file appenders
-        this.fileAppender = rolling ? createRollingAppender(logFileName, null)
-                                    : createFileAppender(logFileName, null)
-
-        this.hashAppender = rolling ? createRollingAppender(hashFileName, hashFilter)
-                                    : createFileAppender(hashFileName, hashFilter)
+        this.fileAppender = rolling ? createRollingAppender(logFileName, null, loggerContext)
+                                    : createFileAppender(logFileName, null, loggerContext)
 
         // -- configure the ROOT logger
         root.setLevel(Level.INFO)
@@ -162,8 +149,6 @@ class LoggerHelper {
             root.addAppender(fileAppender)
         if( consoleAppender )
             root.addAppender(consoleAppender)
-        if( hashAppender )
-            root.addAppender(hashAppender)
 
         // -- main package logger
         def mainLevel = packages[MAIN_PACKAGE] == Level.TRACE ? Level.TRACE : Level.DEBUG
@@ -192,8 +177,6 @@ class LoggerHelper {
             logger.addAppender(fileAppender)
         if( consoleAppender )
             logger.addAppender(consoleAppender)
-        if( hashAppender )
-            logger.addAppender(hashAppender)
 
         return logger
     }
@@ -216,7 +199,7 @@ class LoggerHelper {
         return result
     }
 
-    protected RollingFileAppender createRollingAppender(String name, Filter filter) {
+    protected static RollingFileAppender createRollingAppender(String name, Filter filter, LoggerContext loggerContext) {
 
         RollingFileAppender result = name ? new RollingFileAppender() : null
         if( result ) {
@@ -231,7 +214,7 @@ class LoggerHelper {
             rollingPolicy.start()
 
             result.rollingPolicy = rollingPolicy
-            result.encoder = createEncoder()
+            result.encoder = createEncoder(loggerContext)
             result.setContext(loggerContext)
             result.setTriggeringPolicy(new RollOnStartupPolicy())
             result.triggeringPolicy.start()
@@ -245,12 +228,12 @@ class LoggerHelper {
         return result
     }
 
-    protected FileAppender createFileAppender(String name, Filter filter) {
+    protected static FileAppender createFileAppender(String name, Filter filter, LoggerContext loggerContext) {
 
         FileAppender result = name ? new FileAppender() : null
         if( result ) {
             result.file = name
-            result.encoder = createEncoder()
+            result.encoder = createEncoder(loggerContext)
             result.setContext(loggerContext)
 
             if ( filter )
@@ -262,12 +245,30 @@ class LoggerHelper {
         return result
     }
 
-    protected PatternLayoutEncoder createEncoder() {
+    static protected PatternLayoutEncoder createEncoder(LoggerContext loggerContext) {
         def result = new PatternLayoutEncoder()
         result.setPattern('%d{MMM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n')
         result.setContext(loggerContext)
         result.start()
         return result
+    }
+
+    /**
+     * Add a rolling file appender that is filtered for just the log messages
+     * identified with the specified marker.
+     *
+     * @param marker Marker used to filter the logs and name the output file.
+     */
+    public static void addMarkerLogger(Marker marker) {
+
+        final filter = new MarkerLoggerFilter(marker)
+        filter.start()
+
+        final lc = (LoggerContext) LoggerFactory.getILoggerFactory()
+        final main = lc.getLogger(MAIN_PACKAGE)
+
+        final FileAppender appender = createRollingAppender(marker.getName(), filter, lc)
+        main.addAppender(appender)
     }
 
     /**
@@ -319,6 +320,10 @@ class LoggerHelper {
                 return FilterReply.NEUTRAL;
             }
 
+            if (event.getMarker() != null) {
+                return FilterReply.DENY
+            }
+
             def logger = event.getLoggerName()
             def level = event.getLevel()
             for( int i=0; i<len; i++ ) {
@@ -333,11 +338,16 @@ class LoggerHelper {
     }
 
     static class MarkerLoggerFilter extends Filter<ILoggingEvent> {
+        final private Marker marker;
+
+        MarkerLoggerFilter(Marker marker) {
+            this.marker = marker
+        }
 
         @Override
         FilterReply decide(ILoggingEvent event) {
 
-            if (event.getMarker() == hashMarker) {
+            if (event.getMarker() == this.marker) {
                 return FilterReply.NEUTRAL;
             }
 
