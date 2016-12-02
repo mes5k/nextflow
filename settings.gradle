@@ -24,6 +24,7 @@ include 'nxf-dnanexus'
 include 'nxf-console'
 include 'nxf-drmaa'
 include 'nxf-ignite'
+include 'nxf-httpfs'
 
 rootProject.children.each { prj ->
     prj.projectDir = new File("$rootDir/subprojects/$prj.name")
