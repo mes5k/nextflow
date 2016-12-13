@@ -50,6 +50,7 @@ import nextflow.trace.ExtraeTraceObserver
 import nextflow.trace.GraphObserver
 import nextflow.trace.TimelineObserver
 import nextflow.trace.TraceFileObserver
+import nextflow.trace.TraceWebsocketObserver
 import nextflow.trace.TraceObserver
 import nextflow.util.Barrier
 import nextflow.util.ConfigHelper
@@ -304,6 +305,7 @@ class Session implements ISession {
         createTimelineObserver(result)
         createExtraeObserver(result)
         createDagObserver(result)
+        createTraceWebsocketObserver(result)
 
         return result
     }
@@ -362,7 +364,15 @@ class Session implements ISession {
             config.navigate('trace.sep') { observer.separator = it }
             config.navigate('trace.fields') { observer.setFieldsAndFormats(it) }
             result << observer
+        }
     }
+
+    protected void createTraceWebsocketObserver(Collection<TraceObserver> result) {
+        Boolean isEnabled = true // config.navigate('websocket.enabled') as Boolean
+        if( isEnabled ) {
+            def observer = new TraceWebsocketObserver()
+            result << observer
+        }
     }
 
     def Session start() {
