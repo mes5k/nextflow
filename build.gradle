@@ -55,13 +55,14 @@ ext {
 allprojects {
     apply plugin: 'java'
 
-    version = '0.22.5'
+    version = '0.23.0'
     group = 'io.nextflow'
 
     sourceCompatibility = 1.7
     targetCompatibility = 1.7
 
     repositories {
+        jcenter()
         mavenCentral()
         maven { url 'http://uk.maven.org/maven2' }
         maven { url 'http://dl.bintray.com/paolo-ditommaso/maven'}
