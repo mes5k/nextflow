@@ -80,6 +80,7 @@ import nextflow.util.BlankSeparatedList
 import nextflow.util.CacheHelper
 import nextflow.util.CollectionHelper
 import nextflow.util.LoggerHelper
+import nextflow.util.LoggerMarker
 
 import static nextflow.processor.ErrorStrategy.*
 /**
@@ -1816,7 +1817,7 @@ class TaskProcessor {
             buffer.append( "  ${CacheHelper.hasher(item, mode).hash()} [${item?.class?.name}] $item \n")
         }
 
-        log.info(Session.hashMarker, buffer.toString())
+        log.info(LoggerMarker.hashMarker, buffer.toString())
     }
 
     final protected Map<String,Object> getTaskGlobalVars(TaskRun task) {
