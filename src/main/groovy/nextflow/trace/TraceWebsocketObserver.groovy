@@ -21,6 +21,7 @@
 package nextflow.trace
 
 import groovy.transform.CompileStatic
+import groovy.json.JsonOutput
 import nextflow.Session
 import nextflow.processor.TaskHandler
 import nextflow.processor.TaskProcessor
@@ -28,6 +29,8 @@ import nextflow.processor.TaskProcessor
 import com.corundumstudio.socketio.Configuration;
 import com.corundumstudio.socketio.SocketIOServer;
 import com.corundumstudio.socketio.BroadcastOperations;
+
+
 
 /**
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -54,7 +57,7 @@ class TraceWebsocketObserver implements TraceObserver {
     @Override
     void onFlowStart(Session session) {
         server.start();
-        bo.sendEvent("message", "onFlowStart");
+        bo.sendEvent("message", getJson("onFlowStart", []));
     }
 
     /**
@@ -62,7 +65,7 @@ class TraceWebsocketObserver implements TraceObserver {
      */
     @Override
     void onFlowComplete() {
-        bo.sendEvent("message", "onFlowStop");
+        bo.sendEvent("message", getJson("onFlowStop", []));
         server.stop();
     }
 
@@ -71,7 +74,7 @@ class TraceWebsocketObserver implements TraceObserver {
      */
     @Override
     void onProcessCreate( TaskProcessor process ) {
-        bo.sendEvent("message", "onProcessCreate");
+        bo.sendEvent("message", getJson("onProcessCreate", []));
     }
 
     /**
@@ -80,7 +83,7 @@ class TraceWebsocketObserver implements TraceObserver {
      */
     @Override
     void onProcessSubmit(TaskHandler handler) {
-        bo.sendEvent("message", "onProcessSubmit");
+        bo.sendEvent("message", getJson("onProcessSubmit", handler));
     }
 
     /**
@@ -89,7 +92,7 @@ class TraceWebsocketObserver implements TraceObserver {
      */
     @Override
     void onProcessStart(TaskHandler handler) {
-        bo.sendEvent("message", "onProcessStart");
+        bo.sendEvent("message", getJson("onProcessStart", handler));
     }
 
     /**
@@ -98,7 +101,7 @@ class TraceWebsocketObserver implements TraceObserver {
      */
     @Override
     void onProcessComplete(TaskHandler handler) {
-        bo.sendEvent("message", "onProcessComplete");
+        bo.sendEvent("message", getJson("onProcessComplete", handler));
     }
 
     /**
@@ -107,7 +110,17 @@ class TraceWebsocketObserver implements TraceObserver {
      */
     @Override
     void onProcessCached(TaskHandler handler) {
-        bo.sendEvent("message", "onProcessCached");
+        bo.sendEvent("message", getJson("onProcessCached", handler));
+    }
+
+    private String getJson(messageName, handler) {
+        def rec = []
+
+        if ( handler instanceof TaskHandler ) {
+            rec = handler.getTraceRecord().store
+        }
+
+        return JsonOutput.toJson(["name": messageName, "record": rec])
     }
 
 }
