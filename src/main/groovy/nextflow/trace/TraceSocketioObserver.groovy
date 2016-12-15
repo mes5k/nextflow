@@ -46,6 +46,7 @@ class TraceSocketioObserver implements TraceObserver {
         Configuration config = new Configuration();
         config.setHostname("localhost");
         config.setPort(9092);
+        config.getSocketConfig().setReuseAddress(true);
 
         server = new SocketIOServer(config);
         bo = server.getBroadcastOperations();
