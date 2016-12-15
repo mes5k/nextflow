@@ -139,9 +139,11 @@ class LoggerHelper {
         // -- the console appender
         this.consoleAppender = createConsoleAppender()
 
+        def skip = new SkipMarkersLoggerFilter()
+
         // -- the file appenders
-        this.fileAppender = rolling ? createRollingAppender(logFileName, null, loggerContext)
-                                    : createFileAppender(logFileName, null, loggerContext)
+        this.fileAppender = rolling ? createRollingAppender(logFileName, skip, loggerContext)
+                                    : createFileAppender(logFileName, skip, loggerContext)
 
         // -- configure the ROOT logger
         root.setLevel(Level.INFO)
@@ -190,9 +192,12 @@ class LoggerHelper {
             filter.setContext(loggerContext)
             filter.start()
 
+            final skipMarkers = new SkipMarkersLoggerFilter()
+
             result.setContext(loggerContext)
             result.setEncoder( new LayoutWrappingEncoder( layout: new PrettyConsoleLayout() ) )
             result.addFilter(filter)
+            result.addFilter(skipMarkers)
             result.start()
         }
 
@@ -320,10 +325,6 @@ class LoggerHelper {
                 return FilterReply.NEUTRAL;
             }
 
-            if (event.getMarker() != null) {
-                return FilterReply.DENY
-            }
-
             def logger = event.getLoggerName()
             def level = event.getLevel()
             for( int i=0; i<len; i++ ) {
@@ -352,6 +353,18 @@ class LoggerHelper {
             }
 
             return FilterReply.DENY
+        }
+    }
+
+    static class SkipMarkersLoggerFilter extends Filter<ILoggingEvent> {
+        @Override
+        FilterReply decide(ILoggingEvent event) {
+
+            if (event.getMarker() != null) {
+                return FilterReply.DENY;
+            }
+
+            return FilterReply.NEUTRAL
         }
     }
 
