@@ -81,6 +81,7 @@ class LoggerHelper {
     private LoggerContext loggerContext
 
     private ConsoleAppender consoleAppender
+    private ConsoleAppender stderrConsoleAppender
 
     private FileAppender fileAppender
 
@@ -131,8 +132,12 @@ class LoggerHelper {
         debugConf.each { packages[it] = Level.DEBUG }
         traceConf.each { packages[it] = Level.TRACE }
 
+        def skipMarkers = new MarkersFilter(false)
+        def showMarkers = new MarkersFilter(true)
+
         // -- the console appender
-        this.consoleAppender = createConsoleAppender()
+        this.consoleAppender = createConsoleAppender("System.out", skipMarkers)
+        this.stderrConsoleAppender = createConsoleAppender("System.err", showMarkers)
 
         // -- the file appender
         this.fileAppender = rolling ? createRollingAppender() : createFileAppender()
@@ -143,6 +148,8 @@ class LoggerHelper {
             root.addAppender(fileAppender)
         if( consoleAppender )
             root.addAppender(consoleAppender)
+        if( stderrConsoleAppender )
+            root.addAppender(stderrConsoleAppender)
 
         // -- main package logger
         def mainLevel = packages[MAIN_PACKAGE] == Level.TRACE ? Level.TRACE : Level.DEBUG
@@ -171,11 +178,13 @@ class LoggerHelper {
             logger.addAppender(fileAppender)
         if( consoleAppender )
             logger.addAppender(consoleAppender)
+        if( stderrConsoleAppender )
+            logger.addAppender(stderrConsoleAppender)
 
         return logger
     }
 
-    protected ConsoleAppender createConsoleAppender() {
+    protected ConsoleAppender createConsoleAppender(String target, Filter markerFilter) {
 
         final ConsoleAppender result = daemon && opts.isBackground() ? null : new ConsoleAppender()
         if( result )  {
@@ -187,6 +196,8 @@ class LoggerHelper {
             result.setContext(loggerContext)
             result.setEncoder( new LayoutWrappingEncoder( layout: new PrettyConsoleLayout() ) )
             result.addFilter(filter)
+            result.addFilter(markerFilter)
+            result.setTarget(target)
             result.start()
         }
 
@@ -298,6 +309,31 @@ class LoggerHelper {
             }
 
             return FilterReply.DENY
+        }
+    }
+
+    static class MarkersFilter extends Filter<ILoggingEvent> {
+
+        private final FilterReply returnMarkerPresent
+        private final FilterReply returnMarkerMissing
+
+        MarkersFilter(boolean allowed) {
+            if (allowed) {
+                returnMarkerPresent = FilterReply.NEUTRAL
+                returnMarkerMissing = FilterReply.DENY
+            } else {
+                returnMarkerPresent = FilterReply.DENY
+                returnMarkerMissing = FilterReply.NEUTRAL
+            }
+        }
+
+        @Override
+        FilterReply decide(ILoggingEvent event) {
+            if (event.getMarker() != null) {
+                return returnMarkerPresent
+            } else {
+                return returnMarkerMissing
+            }
         }
     }
 
