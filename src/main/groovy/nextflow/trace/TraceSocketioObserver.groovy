@@ -37,12 +37,12 @@ import com.corundumstudio.socketio.BroadcastOperations;
  * @author Mike Smoot <mes@aescon.com>
  */
 @CompileStatic
-class TraceWebsocketObserver implements TraceObserver {
+class TraceSocketioObserver implements TraceObserver {
 
     private final BroadcastOperations bo;
     private final SocketIOServer server;
 
-    TraceWebsocketObserver() {
+    TraceSocketioObserver() {
         Configuration config = new Configuration();
         config.setHostname("localhost");
         config.setPort(9092);

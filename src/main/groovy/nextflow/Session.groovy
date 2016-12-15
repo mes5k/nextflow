@@ -50,7 +50,7 @@ import nextflow.trace.ExtraeTraceObserver
 import nextflow.trace.GraphObserver
 import nextflow.trace.TimelineObserver
 import nextflow.trace.TraceFileObserver
-import nextflow.trace.TraceWebsocketObserver
+import nextflow.trace.TraceSocketioObserver
 import nextflow.trace.TraceObserver
 import nextflow.util.Barrier
 import nextflow.util.ConfigHelper
@@ -305,7 +305,7 @@ class Session implements ISession {
         createTimelineObserver(result)
         createExtraeObserver(result)
         createDagObserver(result)
-        createTraceWebsocketObserver(result)
+        createTraceSocketioObserver(result)
 
         return result
     }
@@ -367,10 +367,10 @@ class Session implements ISession {
         }
     }
 
-    protected void createTraceWebsocketObserver(Collection<TraceObserver> result) {
-        Boolean isEnabled = true // config.navigate('websocket.enabled') as Boolean
+    protected void createTraceSocketioObserver(Collection<TraceObserver> result) {
+        Boolean isEnabled = true // config.navigate('socketio.enabled') as Boolean
         if( isEnabled ) {
-            def observer = new TraceWebsocketObserver()
+            def observer = new TraceSocketioObserver()
             result << observer
         }
     }
