@@ -59,7 +59,6 @@ import nextflow.util.ClusterConfig
 import nextflow.util.Duration
 import nextflow.util.MemoryUnit
 import nextflow.util.SysHelper
-import nextflow.util.LoggerMarker
 import org.apache.ignite.Ignite
 import org.apache.ignite.IgniteCache
 import org.apache.ignite.cache.query.ScanQuery
@@ -137,7 +136,7 @@ class SchedulerAgent implements Closeable {
         @Override
         void run() {
             this.current = new Resources(config)
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Scheduler agent resources: $current"
+            log.debug "=== Scheduler agent resources: $current"
 
             while( !stopped ) {
                 try {
@@ -166,14 +165,14 @@ class SchedulerAgent implements Closeable {
 
                 }
                 catch( InterruptedException e ) {
-                    log.trace LoggerMarker.schedulerAgentMarker, "=== Message processor interrupted"
+                    log.trace "=== Message processor interrupted"
                     stopped = true
                 }
                 catch( RejectedExecutionException e ) {
-                    log.trace LoggerMarker.schedulerAgentMarker, "=== Task execution rejected -- ${e.message ?: e}"
+                    log.trace "=== Task execution rejected -- ${e.message ?: e}"
                 }
                 catch( Exception e ) {
-                    log.error LoggerMarker.schedulerAgentMarker, "=== Unexpected scheduler agent error", e
+                    log.error "=== Unexpected scheduler agent error", e
                 }
             }
 
@@ -184,7 +183,7 @@ class SchedulerAgent implements Closeable {
                 return
             }
 
-            log.debug LoggerMarker.schedulerAgentMarker, "=== aborting pending tasks: taskId=${runningTasks.keySet().join(",") ?: '-'}"
+            log.debug "=== aborting pending tasks: taskId=${runningTasks.keySet().join(",") ?: '-'}"
             def itr = runningTasks.values().iterator()
             while( itr.hasNext() ) {
                 RunHolder holder = itr.next()
@@ -195,7 +194,7 @@ class SchedulerAgent implements Closeable {
         private void checkSpotTermination() {
             def termination = driver?.getLocalTerminationNotice()
             if( termination || (simulateSpotTermination && runningTasks)) {
-                log.debug LoggerMarker.schedulerAgentMarker, "=== Detected spot termination notice: $termination -- Starting shutdown"
+                log.debug "=== Detected spot termination notice: $termination -- Starting shutdown"
                 abortPendingTasks()
                 notifyNodeRetired(termination ?: 'fake-spot-termination')
                 stopped = true
@@ -206,7 +205,7 @@ class SchedulerAgent implements Closeable {
         private void resetState() {
 
             if( runningTasks ) {
-                log.trace LoggerMarker.schedulerAgentMarker, "=== Cancelling running tasks: taskId=${runningTasks.keySet().join(', ') ?: '-'}"
+                log.trace "=== Cancelling running tasks: taskId=${runningTasks.keySet().join(', ') ?: '-'}"
                 def itr = runningTasks.values().iterator()
                 while( itr.hasNext() ) {
                     RunHolder holder = itr.next()
@@ -219,7 +218,7 @@ class SchedulerAgent implements Closeable {
             pendingTasks.clear()
 
             current = new Resources(config)
-            log.trace LoggerMarker.schedulerAgentMarker, "=== Agent resources after reset: $current"
+            log.trace "=== Agent resources after reset: $current"
             eventsQueue.clear()
             idleTimestamp = 0
         }
@@ -228,7 +227,7 @@ class SchedulerAgent implements Closeable {
             int c=0
             while( !masterId && !stopped ) {
                 if ( c++ % 60 == 0 ) {
-                    log.debug LoggerMarker.schedulerAgentMarker, "=== Waiting for master node to join.."
+                    log.debug "=== Waiting for master node to join.."
                 }
 
                 try {
@@ -275,7 +274,7 @@ class SchedulerAgent implements Closeable {
                 def delta = System.currentTimeMillis() - errorTimestamp
                 def penalty = Math.round(Math.pow(errorCount, 2) * 1000)
                 if( delta < penalty ) {
-                    log.debug LoggerMarker.schedulerAgentMarker, "=== Error burst prevention: errorCount=$errorCount; penalty=${Duration.of(penalty)}; delta=${Duration.of(delta)}"
+                    log.debug "=== Error burst prevention: errorCount=$errorCount; penalty=${Duration.of(penalty)}; delta=${Duration.of(delta)}"
                     return 0
                 }
             }
@@ -298,7 +297,7 @@ class SchedulerAgent implements Closeable {
                     continue
 
                 if( pendingTasks.getAndRemove(it.taskId) ) {
-                    log.trace LoggerMarker.schedulerAgentMarker, "=== Picked task up: taskId=${it.taskId}"
+                    log.trace "=== Picked task up: taskId=${it.taskId}"
                     // -- decrement resources
                     avail.cpus -= res.cpus
                     avail.memory -= res.memory
@@ -330,17 +329,17 @@ class SchedulerAgent implements Closeable {
             log.trace "Check avail resources: taskId=${it.taskId}; req=[$req]; avail=[$avail]"
 
             if( req.cpus && req.cpus > avail.cpus ) {
-                log.trace LoggerMarker.schedulerAgentMarker, "=== Cannot execute task: taskId=${it.taskId} -- CPUs request exceed available (req=${req.cpus}; avail=${avail.cpus})"
+                log.trace "=== Cannot execute task: taskId=${it.taskId} -- CPUs request exceed available (req=${req.cpus}; avail=${avail.cpus})"
                 return false
             }
 
             if( req.memory && req.memory > avail.memory ) {
-                log.trace LoggerMarker.schedulerAgentMarker, "=== Cannot execute task: taskId=${it.taskId} -- Memory request exceed available (req=${req.memory}; avail=${avail.memory})"
+                log.trace "=== Cannot execute task: taskId=${it.taskId} -- Memory request exceed available (req=${req.memory}; avail=${avail.memory})"
                 return false
             }
 
             if( req.disk && req.disk > avail.disk ) {
-                log.trace LoggerMarker.schedulerAgentMarker, "=== Cannot execute task: taskId=${it.taskId} -- Disk request exceed available (req=${req.disk}; avail=${avail.disk})"
+                log.trace "=== Cannot execute task: taskId=${it.taskId} -- Disk request exceed available (req=${req.disk}; avail=${avail.disk})"
                 return false
             }
 
@@ -360,7 +359,7 @@ class SchedulerAgent implements Closeable {
                 error = result instanceof Integer && ((int)result) > 0
             }
             catch( InterruptedException | ClosedByInterruptException e ) {
-                log.trace LoggerMarker.schedulerAgentMarker, "=== Task execution was interrupted: taskId=${task.taskId} -- Message: ${e.message ?: e}"
+                log.trace "=== Task execution was interrupted: taskId=${task.taskId} -- Message: ${e.message ?: e}"
                 error = true
             }
             catch( Throwable e ) {
@@ -394,7 +393,7 @@ class SchedulerAgent implements Closeable {
                 current.cpus += used.cpus
                 current.memory += used.memory
                 current.disk = SysHelper.getAvailDisk()
-                log.trace LoggerMarker.schedulerAgentMarker, "=== Resources after task execution: taskId=$taskId; $current"
+                log.trace "=== Resources after task execution: taskId=$taskId; $current"
 
                 // track the time when enter in idle state
                 if( current.cpus == total.cpus ) {
@@ -412,7 +411,7 @@ class SchedulerAgent implements Closeable {
                 errorCount = 0
                 errorTimestamp = 0
             }
-            log.trace LoggerMarker.schedulerAgentMarker, "=== Errors: flag=$errorFlag; count=$errorCount; timestamp=$errorTimestamp"
+            log.trace "=== Errors: flag=$errorFlag; count=$errorCount; timestamp=$errorTimestamp"
 
         }
 
@@ -505,7 +504,7 @@ class SchedulerAgent implements Closeable {
             return config.isCloudCluster() ? CloudDriverFactory.getDriver(driverName) : null
         }
         catch( Exception e ) {
-            log.error LoggerMarker.schedulerAgentMarker, "=== Can't load cloud driver: `$driverName`", e
+            log.error "=== Can't load cloud driver: `$driverName`", e
             return null
         }
     }
@@ -561,17 +560,17 @@ class SchedulerAgent implements Closeable {
 
     private void onNodeJoined(UUID nodeId) {
         if( !masterId && isMasterNode(nodeId) ) {
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Master node joined: nodeId=$nodeId"
+            log.debug "=== Master node joined: nodeId=$nodeId"
             masterId = nodeId
         }
         else {
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Cluster node joined: nodeId=$nodeId"
+            log.debug "=== Cluster node joined: nodeId=$nodeId"
         }
     }
 
     private void onNodeFailed(UUID nodeId) {
         if( nodeId == masterId ) {
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Master node failed: nodeId=$nodeId"
+            log.debug "=== Master node failed: nodeId=$nodeId"
             masterId = null
             eventProcessor.newMessage()
         }
@@ -579,7 +578,7 @@ class SchedulerAgent implements Closeable {
 
     private void onNodeLeft(UUID nodeId) {
         if( nodeId == masterId ) {
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Master node left: nodeId=$nodeId"
+            log.debug "=== Master node left: nodeId=$nodeId"
             masterId = null
             eventProcessor.newMessage()
         }
@@ -634,12 +633,12 @@ class SchedulerAgent implements Closeable {
 
     private void sendMessageToMaster( String topic, message ) {
         if( !masterId ) {
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Master node is unknown -- Cannot send message: [${message.getClass().getSimpleName()}] $message"
+            log.debug "=== Master node is unknown -- Cannot send message: [${message.getClass().getSimpleName()}] $message"
             return
         }
 
         if( closed ) {
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Shutdown in progress -- Wont send message: [${message.getClass().getSimpleName()}] $message"
+            log.debug "=== Shutdown in progress -- Wont send message: [${message.getClass().getSimpleName()}] $message"
             return
         }
 
@@ -648,7 +647,7 @@ class SchedulerAgent implements Closeable {
             ignite .message(master) .sendOrdered(topic, message, 0)
         }
         catch ( ClusterGroupEmptyException e ) {
-            log.debug LoggerMarker.schedulerAgentMarker, "=== Master node is not available -- Cannot send message: [${message.getClass().getSimpleName()}] $message"
+            log.debug "=== Master node is not available -- Cannot send message: [${message.getClass().getSimpleName()}] $message"
         }
     }
 
@@ -677,12 +676,12 @@ class SchedulerAgent implements Closeable {
      */
     @PackageScope void notifyComplete(IgBaseTask task, result) {
         try {
-            log.trace LoggerMarker.schedulerAgentMarker, "=== Notify task complete: taskId=${task.taskId}; result=$result"
+            log.trace "=== Notify task complete: taskId=${task.taskId}; result=$result"
             final payload = TaskComplete.create(task, result)
             sendMessageToMaster(TOPIC_SCHEDULER_EVENTS, payload)
         }
         catch( Exception e ) {
-            log.error LoggerMarker.schedulerAgentMarker, "=== Failed to notify task completion: taskId=${task.taskId}; result=$result", e
+            log.error "=== Failed to notify task completion: taskId=${task.taskId}; result=$result", e
         }
     }
 
@@ -695,17 +694,17 @@ class SchedulerAgent implements Closeable {
     @PackageScope void notifyError(IgBaseTask task, Throwable error) {
         try {
             final taskId = task.taskId
-            log.trace LoggerMarker.schedulerAgentMarker, "=== Notify task complete [error]: taskId=${taskId}; error=$error"
+            log.trace "=== Notify task complete [error]: taskId=${taskId}; error=$error"
             final payload = TaskComplete.error(task, error)
             sendMessageToMaster(TOPIC_SCHEDULER_EVENTS, payload)
         }
         catch( Exception e ) {
-            log.error LoggerMarker.schedulerAgentMarker, "=== Failed to notify task completion: taskId=${task.taskId}; error=$error", e
+            log.error "=== Failed to notify task completion: taskId=${task.taskId}; error=$error", e
         }
     }
 
     @PackageScope void notifyNodeIdle(long last) {
-        log.trace LoggerMarker.schedulerAgentMarker, "=== Notify node idle"
+        log.trace "=== Notify node idle"
         sendMessageToMaster(TOPIC_SCHEDULER_EVENTS, new NodeIdle(last))
     }
 
@@ -718,11 +717,11 @@ class SchedulerAgent implements Closeable {
     @PackageScope void onCancelTask( TaskCancel message ) {
         def holder = runningTasks.get(message.taskId)
         if( holder ) {
-            log.trace LoggerMarker.schedulerAgentMarker, "=== Cancelling task: taskId=${message.taskId}"
+            log.trace "=== Cancelling task: taskId=${message.taskId}"
             holder.future.cancel(true)
         }
         else {
-            log.trace LoggerMarker.schedulerAgentMarker, "=== Unable to find task to cancel: taskId=${message.taskId}"
+            log.trace "=== Unable to find task to cancel: taskId=${message.taskId}"
         }
     }
 
@@ -731,7 +730,7 @@ class SchedulerAgent implements Closeable {
      */
     synchronized void close(boolean shutdownIgnite = false) {
         if( closed ) return
-        log.debug LoggerMarker.schedulerAgentMarker, "=== Scheduler agent shutting down"
+        log.debug "=== Scheduler agent shutting down"
         closed = true
 
         // -- shutdown executor & agent processor

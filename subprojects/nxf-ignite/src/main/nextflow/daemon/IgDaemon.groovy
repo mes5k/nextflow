@@ -29,8 +29,6 @@ import nextflow.scheduler.SchedulerAgent
 import nextflow.util.KryoHelper
 import nextflow.util.PathSerializer
 import nextflow.util.ServiceName
-import nextflow.util.LoggerHelper
-import nextflow.util.LoggerMarker
 import sun.misc.Signal
 import sun.misc.SignalHandler
 
@@ -68,7 +66,6 @@ class IgDaemon implements DaemonLauncher {
         /*
          * Scheduler agent
          */
-        LoggerHelper.addMarkerLogger(LoggerMarker.schedulerAgentMarker)
         final agent = new SchedulerAgent(grid, factory.clusterConfig).run()
 
         final handler = { log.info "System terminated -- Stopping daemon.."; agent.close(true) } as SignalHandler

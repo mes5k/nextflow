@@ -39,6 +39,4 @@ class LoggerMarker {
      */
     public static final Marker hashMarker = MarkerFactory.getMarker('hashes')
 
-    public static final Marker schedulerAgentMarker = MarkerFactory.getMarker('schedulerAgent.log')
-
 }
