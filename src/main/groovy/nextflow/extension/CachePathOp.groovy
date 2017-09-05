@@ -22,6 +22,8 @@ package nextflow.extension
 import static nextflow.util.CheckHelper.checkParams
 
 import java.nio.file.Path
+import java.nio.file.Files
+import static java.nio.file.StandardCopyOption.*
 
 import groovy.util.logging.Slf4j
 import groovyx.gpars.dataflow.DataflowQueue
@@ -29,7 +31,9 @@ import groovyx.gpars.dataflow.DataflowReadChannel
 import nextflow.Channel
 import nextflow.Global
 import nextflow.file.FileHelper
+import nextflow.file.CopyMoveHelper
 import nextflow.util.CacheHelper
+import nextflow.Nextflow
 
 /**
  * Implements the body of {@link DataflowExtensions#cachePath(groovyx.gpars.dataflow.DataflowReadChannel)} operator
@@ -41,9 +45,7 @@ import nextflow.util.CacheHelper
 class CachePathOp {
 
     static final Map CACHE_PATH_PARAMS = [
-            storeDir: [Path,File,CharSequence],
-            copyLocal: Boolean,
-            deep: Boolean,
+            storeDir: [Path,File,CharSequence]
     ]
 
     private final Map params
@@ -56,50 +58,12 @@ class CachePathOp {
 
     private boolean linkLocalPaths = true
 
-    private CacheHelper.HashMode cachingMode
-
-
     CachePathOp( final DataflowReadChannel channel, Map params) {
 
         checkParams('cachePath', params, CACHE_PATH_PARAMS)
         this.params = params
         this.channel = channel
         this.result = new DataflowQueue()
-
-        defineLinkLocally()
-        defineStoreDir()
-        defineDeepCaching()
-    }
-
-    protected defineLinkLocally() {
-        if (params?.copyLocal) {
-            linkLocalPaths = !(params?.copyLocal as boolean)
-        }
-    }
-
-    protected defineDeepCaching() {
-        def deep = true
-        if (params?.deep) {
-           deep = params?.deep as boolean
-        }
-
-        if (deep) {
-            cachingMode = CacheHelper.HashMode.DEEP
-        } else {
-            cachingMode = CacheHelper.HashMode.STANDARD
-        }
-    }
-
-    protected defineStoreDir() {
-        // check if a 'storeDir' is provided otherwise fallback to a temp
-        // folder in the session working directory
-        if( params?.storeDir )
-            storeDir = params?.storeDir as Path
-
-        if( storeDir )
-            storeDir.createDirIfNotExists()
-        else
-            storeDir = FileHelper.createTempFolder(Global.session.workDir)
     }
 
     /*
@@ -114,57 +78,27 @@ class CachePathOp {
         }
     }
 
-    /*
-     * Main caching logic here.
-     * If the input path doesn't exist in the cache, always cache it.
-     * If the input path is on the local file system
-     * then cache and we're symlinking local paths, then copy input into cache.
-     * If the input path is remote, always copy into cache.
-     * If the cache target already exists and is not a symlink, then hash
-     * the files and only re-copy them if the hashes don't match.
-     */
     protected getCachedPath( inPath ) {
-        def cachedPath = storeDir + "/" + inPath
+        def cached = null
+        def storeDir = params?.storeDir ? params?.storeDir as Path : null
 
-        if ( !cachedPath.exists() ) {
-
-            if ( isLocal(inPath) && linkLocalPaths ) {
-                log.info("Symlinking ${inPath} to ${cachedPath}")
-                createSymlink( inPath, cachedPath )
-            } else {
-                log.info("Caching ${inPath} to ${cachedPath}")
-                copy(inPath, cachedPath)
+        if ( Files.isDirectory( inPath ) ) {
+            log.warn("caching dir")
+            cached = Nextflow.cacheableDir( inPath, storeDir )
+            if ( FileHelper.empty( cached ) ) {
+                log.warn("copying dir")
+                CopyMoveHelper.copyDirectory( inPath, cached, REPLACE_EXISTING )
             }
-
-        } else if ( !cachedPath.isLink() ) {
-
-            def inHash = CacheHelper.hasher(inPath, cachingMode).hash().asLong()
-            def cacheHash = CacheHelper.hasher(cachedPath, cachingMode).hash().asLong()
-
-            if (inHash != cacheHash) {
-                log.info("Re-Caching ${inPath} to ${cachedPath}")
-                copy(inPath, cachedPath)
+        } else {
+            log.warn("caching file")
+            cached = Nextflow.cacheableFile( inPath.getParent(), inPath.getFileName().toString(), storeDir )
+            if ( !Files.exists( cached ) ) {
+                log.warn("copying dir")
+                CopyMoveHelper.copyFile( inPath, cached, false )
             }
         }
 
-        return cachedPath
-    }
-
-    protected createSymlink(inPath, cachedPath) {
-        cachedPath.getParent().mkdirs()
-        inPath.mklink( cachedPath )
-    }
-
-    protected copy(inPath, cachedPath) {
-        if ( cachedPath.exists() && cachedPath.isDirectory() ) {
-            FileHelper.deletePath(cachedPath)
-        }
-        inPath.copyTo( cachedPath )
-    }
-
-    protected isLocal(path) {
-        def pathUri = path.toUri().toString()
-        return pathUri.startsWith("file")
+        return cached
     }
 
     protected finish(obj) {

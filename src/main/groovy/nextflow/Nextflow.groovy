@@ -269,7 +269,7 @@ class Nextflow {
      *
      * @return The {@code Path} to the cached directory or a newly created folder for the specified key
      */
-    static Path cacheableDir( Object key ) {
+    static Path cacheableDir( Object key, Path storeDir = null ) {
         assert key, "Please specify the 'key' argument on 'cacheableDir' method"
 
         final session = (Session)Global.session
@@ -278,7 +278,8 @@ class Nextflow {
 
         def hash = CacheHelper.hasher([ session.uniqueId, key, session.cacheable ? 0 : random.nextInt() ]).hash()
 
-        def file = FileHelper.getWorkFolder(session.workDir, hash)
+        def targetDir = storeDir ? storeDir : session.workDir
+        def file = FileHelper.getWorkFolder(targetDir, hash)
         if( !file.exists() && !file.mkdirs() ) {
             throw new IOException("Unable to create folder: $file -- Check file system permission" )
         }
@@ -294,10 +295,10 @@ class Nextflow {
      * @param name
      * @return
      */
-    static Path cacheableFile( Object key, String name = null ) {
+    static Path cacheableFile( Object key, String name = null, Path storeDir = null ) {
 
         // the cacheability is guaranteed by the folder
-        def folder = cacheableDir(key)
+        def folder = cacheableDir(key, storeDir)
 
         if( !name ) {
             if( key instanceof File ) {

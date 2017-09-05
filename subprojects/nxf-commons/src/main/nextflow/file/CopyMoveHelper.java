@@ -152,9 +152,10 @@ class CopyMoveHelper {
                 String delta = rel != null ? rel.toString() : null;
                 Path newFolder = delta != null ? target.resolve(delta) : target;
                 if(log.isTraceEnabled())
-                log.trace("Copy DIR: $current -> " + newFolder);
+                    log.trace("Copy DIR: $current -> " + newFolder);
                 // this `copy` creates the new folder, but does not copy the contained files
-                Files.createDirectory(newFolder);
+                if ( !Files.exists(newFolder) )
+                    Files.createDirectory(newFolder);
                 return FileVisitResult.CONTINUE;
             }
 
