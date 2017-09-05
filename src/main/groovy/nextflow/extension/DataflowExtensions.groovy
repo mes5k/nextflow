@@ -1595,7 +1595,6 @@ class DataflowExtensions {
         final newLine = opts.newLine != false
 
         final target = newChannelBy(source);
-        final isChannel = !(target instanceof DataflowExpression)
 
         final printHandle = newLine ? System.out.&println : System.out.&print
 
@@ -1608,7 +1607,7 @@ class DataflowExtensions {
                         },
 
                 onComplete: {
-                    if(isChannel) target.bind(Channel.STOP)
+                    target.close()
                 }
         ]
 
