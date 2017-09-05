@@ -82,18 +82,17 @@ class CachePathOp {
         def cached = null
         def storeDir = params?.storeDir ? params?.storeDir as Path : null
 
+        // cache directory recursively
         if ( Files.isDirectory( inPath ) ) {
-            log.warn("caching dir")
             cached = Nextflow.cacheableDir( inPath, storeDir )
             if ( FileHelper.empty( cached ) ) {
-                log.warn("copying dir")
                 CopyMoveHelper.copyDirectory( inPath, cached, REPLACE_EXISTING )
             }
+
+        // cache file
         } else {
-            log.warn("caching file")
             cached = Nextflow.cacheableFile( inPath.getParent(), inPath.getFileName().toString(), storeDir )
             if ( !Files.exists( cached ) ) {
-                log.warn("copying dir")
                 CopyMoveHelper.copyFile( inPath, cached, false )
             }
         }
