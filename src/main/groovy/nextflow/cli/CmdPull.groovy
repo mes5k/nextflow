@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -35,7 +35,7 @@ import nextflow.scm.AssetManager
 @Parameters(commandDescription = "Download or update a project")
 class CmdPull extends CmdBase implements HubOptions {
 
-    static final NAME = 'pull'
+    static final public NAME = 'pull'
 
     @Parameter(description = 'project name or repository url to pull', arity = 1)
     List<String> args

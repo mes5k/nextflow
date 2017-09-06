@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -33,10 +33,20 @@ class SlurmExecutorTest extends Specification {
 
     def testParseJob() {
 
-        when:
+        given:
         def exec = [:] as SlurmExecutor
-        then:
+
+        expect:
         exec.parseJobId('Submitted batch job 10') == '10'
+        exec.parseJobId('Submitted batch job 20') == '20'
+        exec.parseJobId('30') == '30'
+        exec.parseJobId('40\n') == '40'
+        exec.parseJobId('\n50') == '50'
+
+        when:
+        exec.parseJobId('Something else 10')
+        then:
+        thrown(IllegalStateException)
 
     }
 
@@ -80,6 +90,7 @@ class SlurmExecutorTest extends Specification {
                 #SBATCH -D /work/path
                 #SBATCH -J nf-the_task_name
                 #SBATCH -o /work/path/.command.log
+                #SBATCH --no-requeue
                 '''
                 .stripIndent().leftTrim()
 
@@ -91,6 +102,7 @@ class SlurmExecutorTest extends Specification {
                 #SBATCH -D /work/path
                 #SBATCH -J nf-the_task_name
                 #SBATCH -o /work/path/.command.log
+                #SBATCH --no-requeue
                 #SBATCH -p delta
                 '''
                 .stripIndent().leftTrim()
@@ -103,6 +115,7 @@ class SlurmExecutorTest extends Specification {
                 #SBATCH -D /work/path
                 #SBATCH -J nf-the_task_name
                 #SBATCH -o /work/path/.command.log
+                #SBATCH --no-requeue
                 #SBATCH -t 00:01:00
                 '''
                 .stripIndent().leftTrim()
@@ -118,6 +131,7 @@ class SlurmExecutorTest extends Specification {
                 #SBATCH -D /work/path
                 #SBATCH -J nf-the_task_name
                 #SBATCH -o /work/path/.command.log
+                #SBATCH --no-requeue
                 #SBATCH -t 01:00:00
                 #SBATCH --mem 50
                 #SBATCH -a 1
@@ -136,6 +150,7 @@ class SlurmExecutorTest extends Specification {
                 #SBATCH -D /work/path
                 #SBATCH -J nf-the_task_name
                 #SBATCH -o /work/path/.command.log
+                #SBATCH --no-requeue
                 #SBATCH -c 2
                 #SBATCH -t 02:00:00
                 #SBATCH --mem 200
@@ -155,12 +170,42 @@ class SlurmExecutorTest extends Specification {
                 #SBATCH -D /work/path
                 #SBATCH -J nf-the_task_name
                 #SBATCH -o /work/path/.command.log
+                #SBATCH --no-requeue
                 #SBATCH -c 8
                 #SBATCH -t 51:00:00
                 #SBATCH --mem 3072
                 #SBATCH -x 3
                 '''
                 .stripIndent().leftTrim()
+    }
+
+    def testWorkDirWithBlanks() {
+
+        setup:
+        // LSF executor
+        def executor = Spy(SlurmExecutor)
+
+        // mock process
+        def proc = Mock(TaskProcessor)
+
+        // task object
+        def task = new TaskRun()
+        task.processor = proc
+        task.workDir = Paths.get('/work/some data/path')
+        task.name = 'the task name'
+
+        when:
+        task.index = 21
+        task.config = new TaskConfig()
+        then:
+        executor.getHeaders(task) == '''
+                #SBATCH -D "/work/some\\ data/path"
+                #SBATCH -J nf-the_task_name
+                #SBATCH -o "/work/some\\ data/path/.command.log"
+                #SBATCH --no-requeue
+                '''
+                .stripIndent().leftTrim()
+
     }
 
 
@@ -196,10 +241,12 @@ class SlurmExecutorTest extends Specification {
 
     def testQueueStatusCommand() {
         when:
+        def usr = System.getProperty('user.name')
         def exec = [:] as SlurmExecutor
         then:
-        exec.queueStatusCommand(null) == ['squeue','-h','-o','%i %t']
-        exec.queueStatusCommand('xxx') == ['squeue','-h','-o','%i %t']
+        usr
+        exec.queueStatusCommand(null) == ['squeue','--noheader','-o','%i %t','-t','all','-u', usr]
+        exec.queueStatusCommand('xxx') == ['squeue','--noheader','-o','%i %t','-t','all','-p','xxx','-u', usr]
 
     }
 }

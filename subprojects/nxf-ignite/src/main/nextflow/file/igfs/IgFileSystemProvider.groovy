@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -38,6 +38,8 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.FileAttribute
 import java.nio.file.attribute.FileAttributeView
 import java.nio.file.spi.FileSystemProvider
+
+import static nextflow.Const.ROLE_MASTER
 
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
@@ -144,7 +146,7 @@ class IgFileSystemProvider extends FileSystemProvider {
             final session = env.session as Session
             if( !session )
                 throw new IllegalStateException("Missing `session` object -- Cannot instantiate Ignite grid instance")
-            final factory = new IgGridFactory(IgGridFactory.ROLE_MASTER, session.config ?: [:])
+            final factory = new IgGridFactory(ROLE_MASTER, session.config ?: [:])
             return factory.start()
         }
 

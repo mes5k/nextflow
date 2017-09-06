@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -208,6 +208,10 @@ class LauncherTest extends Specification {
         launcher.normalizeArgs('run','-with-docker', '-x') == ['run', '-with-docker','-', '-x']
         launcher.normalizeArgs('run','-with-docker', 'busybox') == ['run', '-with-docker','busybox']
 
+        launcher.normalizeArgs('run','-with-singularity') == ['run', '-with-singularity','-']
+        launcher.normalizeArgs('run','-with-singularity', '-x') == ['run', '-with-singularity','-', '-x']
+        launcher.normalizeArgs('run','-with-singularity', 'busybox') == ['run', '-with-singularity','busybox']
+
         launcher.normalizeArgs( script.toAbsolutePath().toString(), '--x=1' ) == ['run', script.toAbsolutePath().toString(), '--x=1']
 
 
@@ -280,7 +284,7 @@ class LauncherTest extends Specification {
         capture.toString() == '''
             Options:
               -D
-                 Set JMV properties
+                 Set JVM properties
               -c, -config
                  Add the specified file to configuration set
               -log
@@ -313,7 +317,7 @@ class LauncherTest extends Specification {
         @Parameter(names=['-c','-config'], description = 'Add the specified file to configuration set')
         String opt2
 
-        @DynamicParameter(names = ['-D'], description = 'Set JMV properties' )
+        @DynamicParameter(names = ['-D'], description = 'Set JVM properties' )
         Map opt3
 
         @Parameter(names=['hidden'], hidden = true)

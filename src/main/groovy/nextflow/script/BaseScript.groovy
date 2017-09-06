@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -20,7 +20,6 @@
 
 package nextflow.script
 import groovy.transform.PackageScope
-import groovy.util.logging.Slf4j
 import nextflow.Global
 import nextflow.Session
 import nextflow.processor.ProcessFactory
@@ -30,7 +29,6 @@ import nextflow.processor.TaskProcessor
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
-@Slf4j
 abstract class BaseScript extends Script {
 
     protected BaseScript() { }

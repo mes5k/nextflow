@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -71,6 +71,11 @@ class DurationTest extends Specification {
         new Duration('live_in_3d')
         then:
         thrown(IllegalArgumentException)
+
+        when:
+        new Duration('/path/to/samples/2016-06-05_21:04:05/sample.bam')
+        then:
+        thrown(IllegalArgumentException)
     }
 
     def 'should parse multi unit time format'() {
@@ -79,6 +84,12 @@ class DurationTest extends Specification {
         Duration.of('1 d 2 h').toMillis() ==  DAY + 2 * HOUR
         Duration.of('2d3h4m').toMillis() ==  2 * DAY + 3 * HOUR + 4 * MIN
         Duration.of('2d 3h 4m').toMillis() ==  2 * DAY + 3 * HOUR + 4 * MIN
+    }
+
+    def 'should parse float time' () {
+        expect:
+        Duration.of('10.5 s').toMillis() == 10_500
+        Duration.of('10.5 m').toSeconds() == 630
     }
 
     def 'should parse legacy time format string' () {
@@ -131,6 +142,15 @@ class DurationTest extends Specification {
 
     }
 
+    def 'should not convert UUID number' () {
+
+        when:
+        new Duration('10833d95-1546-4BDF-AEA6-9F9676571854')
+        then:
+        thrown(IllegalArgumentException)
+
+    }
+
     def 'should add time' () {
 
         expect:
@@ -158,67 +178,11 @@ class DurationTest extends Specification {
         new Duration('9 hours') / 1.5 == new Duration('6 hours')
     }
 
-
-    def testThrottle() {
-
-        when:
-        int i = 0
-        int result = -1
-        5.times {
-            result = Duration.of('100ms').throttle { (++i)*2 }
-        }
-
-        // it is invoked just one time
-        // the result it is '2'
-        then:
-        i == 1
-        result == 2
-
-        when:
-        i = 0
-        result = -1
-        5.times {
-            result = Duration.of('100ms').throttle { (++i)*2 }
-            sleep 30
-        }
-
-        // having a sleep of 20 millis and a delay of 100 millis, in 5 times it is called two times
-        then:
-        i == 2
-        result == 4
-
+    def 'should validate groovy truth' () {
+        expect:
+        !new Duration(0)
+        new Duration(1)
     }
 
-    def testThrottleWithSeed() {
-
-        setup:
-
-        when:
-        int i = 0
-        int result = -1
-        5.times {
-            result = Duration.of('100ms').throttle(33) { (++i)*2 }
-        }
-        then:
-        // it is never invoked
-        i == 0
-        // and the 'seed' value it is returned
-        result == 33
-
-
-        when:
-        i = 0
-        result = -1
-        5.times {
-            result = Duration.of('100ms').throttle(null) { (++i)*2 }
-            sleep 30
-        }
-
-        // it is never invoked ust one time
-        then:
-        i == 1
-        result == 2
-
-    }
 
 }

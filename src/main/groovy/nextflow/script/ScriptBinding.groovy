@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -82,11 +82,10 @@ class ScriptBinding extends Binding {
      * @param values
      */
     def void setParams( Map<String,Object> values ) {
-
-        def params = super.getVariable('params') as ParamsMap
-        values ?. each { String name, Object value ->
-            params.put(name, value)
-        }
+        if( !values )
+            return
+        def params = (ParamsMap)super.getVariable('params')
+        params.putAll(values)
     }
 
     /**
@@ -130,6 +129,23 @@ class ScriptBinding extends Binding {
         super.hasVariable(name) || configEnv.containsKey(name) || sysEnv.containsKey(name)
     }
 
+    @Override
+    void setVariable( String name, Object value ) {
+        if( name == 'channel' )
+            log.warn 'The use of the identifier `channel` as variable name is discouraged and will be deprecated in a future version'
+        super.setVariable(name, value)
+    }
+
+    /**
+     * Lookup the name of a variable giving the value reference
+     *
+     * @param value The value for which the variable name is needed
+     * @return The associated variable name
+     */
+    String getVariableName(value) {
+        super.getVariables().find { entry -> entry.value?.is(value) }?.getKey()
+    }
+
     /**
      * Holds parameter immutable values
      */
@@ -140,17 +156,29 @@ class ScriptBinding extends Binding {
 
         private List<String> realNames = []
 
+        private List<String> scriptAssignment = []
+
         @Delegate
         private Map<String,Object> target = new LinkedHashMap<>()
 
         ParamsMap() {}
 
         ParamsMap(Map<String,Object> copy) {
-            copy.each { entry -> this.put(entry.key, entry.value) }
+            putAll(copy)
+        }
+
+        @Override
+        Object get(Object key) {
+            if( !target.containsKey(key) ) {
+                log.warn1("Access to undefined parameter `$key` -- Initialise it to a default value eg. `params.$key = some_value`", firstOnly: true)
+                return null
+            }
+            return target.get(key)
         }
 
         /**
-         * A name-value pair to the map object
+         * A name-value pair to the map object. Note this API it supposed only to be invoked indirectly
+         * when a parameter is defined/assigned. It should not be invoked directly.
          *
          * @param name The pair name
          * @param value The pair value
@@ -159,7 +187,13 @@ class ScriptBinding extends Binding {
         @Override
         String put(String name, Object value) {
             assert name
+            (name in scriptAssignment
+                    ? log.warn("`params.$name` is defined multiple times -- Assignments following the first are ignored")
+                    : scriptAssignment << name )
+            put0(name,value)
+        }
 
+        private String put0(String name, Object value) {
             // keep track of the real name
             realNames << name
 
@@ -177,6 +211,13 @@ class ScriptBinding extends Binding {
             }
 
             return result
+        }
+
+        @Override
+        void putAll(Map other) {
+            for( Map.Entry<String,Object> entry : other.entrySet() ) {
+                put0(entry.getKey(), entry.getValue())
+            }
         }
 
         /**

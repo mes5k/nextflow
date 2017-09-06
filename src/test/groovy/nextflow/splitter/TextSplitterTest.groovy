@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -288,6 +288,15 @@ class TextSplitterTest extends Specification {
 
         chunks[0][1].text == 'line1\nline2\n'
         chunks[1][1].text == 'line3\nline4\n'
+
+    }
+
+    def testRecordModeNotWorking() {
+
+        when:
+        new TextSplitter().options(record:true)
+        then:
+        thrown(IllegalArgumentException)
 
     }
 

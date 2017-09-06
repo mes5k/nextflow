@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -28,6 +28,7 @@ import java.nio.file.FileSystems
 import java.nio.file.FileVisitOption
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.PathMatcher
 import java.nio.file.Paths
@@ -47,6 +48,8 @@ import nextflow.Global
 import nextflow.extension.Bolts
 import nextflow.extension.FilesEx
 import nextflow.util.CacheHelper
+import nextflow.util.Escape
+
 /**
  * Provides some helper method handling files
  *
@@ -57,10 +60,6 @@ import nextflow.util.CacheHelper
 class FileHelper {
 
     static final private Path localTempBasePath
-
-    static final public Pattern GLOB_CURLY_BRACKETS = Pattern.compile(/(.*)(\{.*,.*\})(.*)/)
-
-    static final public Pattern GLOB_SQUARE_BRACKETS = Pattern.compile(/(.*)(\[.+\])(.*)/)
 
     static private Random rndGen = new Random()
 
@@ -262,8 +261,12 @@ class FileHelper {
             checkFileURI(uri)
             return FileSystems.getDefault().getPath(uri.path)
         }
-
-        getOrCreateFileSystemFor(uri).provider().getPath(uri)
+        else if( uri.scheme == 'http' || uri.scheme == 'https' || uri.scheme == 'ftp' ) {
+            Paths.get(uri)
+        }
+        else {
+            getOrCreateFileSystemFor(uri).provider().getPath(uri)
+        }
     }
 
 
@@ -337,23 +340,34 @@ class FileHelper {
         if( path.getFileSystem() != FileSystems.getDefault() )
             return false
 
-        final process = Runtime.runtime.exec("stat -f -c %T ${path}")
-        final status = process.waitFor()
-        final text = process.text?.trim()
-        process.destroy()
-        if( status ) {
-            log.debug "Can't check if specified path is NFS ($status): $path\n${Bolts.indent(text,'  ')}"
-            return false
-        }
-
-        def result = text == 'nfs'
+        final type = getPathFsType(path)
+        def result = type == 'nfs'
         log.debug "NFS path ($result): $path"
         return result
     }
 
+    @Memoized
+    static String getPathFsType(Path path)  {
+        final os = System.getProperty('os.name')
+        if( os != 'Linux' )
+            return os
+
+        final process = Runtime.runtime.exec("stat -f -c %T ${path}")
+        final status = process.waitFor()
+        final text = process.text?.trim()
+        process.destroy()
+
+        if( status ) {
+            log.debug "Can't check if specified path is NFS ($status): $path\n${Bolts.indent(text,'  ')}"
+            return null
+        }
+
+        return text
+    }
+
     /**
      * @return
-     *      {@code true} when the current session working directory is a MFS mounted path
+     *      {@code true} when the current session working directory is a NFS mounted path
      *      {@code false otherwise}
      */
     static boolean getWorkDirIsNFS() {
@@ -390,9 +404,8 @@ class FileHelper {
         while( true ) {
             final process = Runtime.runtime.exec("ls -la ${path}")
             final status = process.waitFor()
-            if( log.isTraceEnabled() ) {
-                log.trace "Safe exists listing: ${status} -- path: ${path}\n${Bolts.indent(process.text,'  ')}"
-            }
+            log.trace "Safe exists listing: ${status} -- path: ${path}\n${Bolts.indent(process.text,'  ')}"
+
             if( status == 0 )
                 break
             def delta = System.currentTimeMillis() -begin
@@ -407,9 +420,7 @@ class FileHelper {
             return true
         }
         catch( IOException e ) {
-            if( log.isTraceEnabled() ) {
-                log.trace "Cant read file attributes: $self -- Cause: [${e.class.simpleName}] ${e.message}"
-            }
+            log.trace "Cant read file attributes: $self -- Cause: [${e.class.simpleName}] ${e.message}"
             return false
         }
 
@@ -608,23 +619,6 @@ class FileHelper {
         }
     }
 
-    /**
-     * Whenever the specified string is a glob file pattern
-     *
-     * @link  http://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#glob
-     *
-     * @param filePattern
-     * @return
-     */
-    static isGlobPattern( String filePattern ) {
-        assert filePattern
-        boolean glob  = false
-        glob |= filePattern.contains('*')
-        glob |= filePattern.contains('?')
-        glob |= GLOB_SQUARE_BRACKETS.matcher(filePattern).matches()
-        return glob || GLOB_CURLY_BRACKETS.matcher(filePattern).matches()
-    }
-
 
     /**
      * Returns a {@code PathMatcher} that performs match operations on the
@@ -720,19 +714,19 @@ class FileHelper {
         final syntax = options?.syntax ?: 'glob'
         final relative = options?.relative == true
 
-        final matcher = getPathMatcherFor("$syntax:${folder.resolve(filePattern)}", folder.fileSystem)
+        final matcher = getPathMatcherFor("$syntax:${filePattern}", folder.fileSystem)
         final singleParam = action.getMaximumNumberOfParameters() == 1
 
         Files.walkFileTree(folder, walkOptions, Integer.MAX_VALUE, new SimpleFileVisitor<Path>() {
 
             @Override
-            public FileVisitResult preVisitDirectory(Path path, BasicFileAttributes attrs) throws IOException {
-                int depth = path.nameCount - folder.nameCount
-                if( log.isTraceEnabled() )
-                    log.trace "visit dir ($depth) > $path; includeDir: $includeDir; matches: ${matcher.matches(path)}; isDir: ${attrs.isDirectory()}"
+            public FileVisitResult preVisitDirectory(Path fullPath, BasicFileAttributes attrs) throws IOException {
+                final int depth = fullPath.nameCount - folder.nameCount
+                final path = folder.relativize(fullPath)
+                log.trace "visitFiles > dir=$path; depth=$depth; includeDir=$includeDir; matches=${matcher.matches(path)}; isDir=${attrs.isDirectory()}"
 
-                if (includeDir && matcher.matches(path) && attrs.isDirectory() && (includeHidden || !isHidden(path))) {
-                    def result = relative ? folder.relativize(path) : path
+                if (depth>0 && includeDir && matcher.matches(path) && attrs.isDirectory() && (includeHidden || !isHidden(fullPath))) {
+                    def result = relative ? path : fullPath
                     singleParam ? action.call(result) : action.call(result,attrs)
                 }
 
@@ -740,12 +734,12 @@ class FileHelper {
             }
 
             @Override
-            public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
-                if( log.isTraceEnabled() )
-                    log.trace "visit file > $path; includeFile: $includeFile; matches: ${matcher.matches(path)}; isRegularFile: ${attrs.isRegularFile()}"
+            public FileVisitResult visitFile(Path fullPath, BasicFileAttributes attrs) throws IOException {
+                final path = folder.relativize(fullPath)
+                log.trace "visitFiles > file=$path; includeFile=$includeFile; matches=${matcher.matches(path)}; isRegularFile=${attrs.isRegularFile()}"
 
-                if (includeFile && matcher.matches(path) && attrs.isRegularFile() && (includeHidden || !isHidden(path))) {
-                    def result = relative ? folder.relativize(path) : path
+                if (includeFile && matcher.matches(path) && attrs.isRegularFile() && (includeHidden || !isHidden(fullPath))) {
+                    def result = relative ? path : fullPath
                     singleParam ? action.call(result) : action.call(result,attrs)
                 }
 
@@ -774,49 +768,6 @@ class FileHelper {
             return filePattern.split('/').findAll { it }.size()-1
 
         return 0
-    }
-
-
-
-    static List<String> getFolderAndPattern( String filePattern ) {
-
-        def scheme = null;
-        int i = filePattern.indexOf('://')
-        if( i != -1 ) {
-            scheme = filePattern.substring(0, i)
-            filePattern = filePattern.substring(i+3)
-        }
-
-        def folder
-        def pattern
-        def matcher
-        int p = filePattern.indexOf('*')
-        if( p != -1 ) {
-            i = filePattern.substring(0,p).lastIndexOf('/')
-        }
-        else if( (matcher=FileHelper.GLOB_CURLY_BRACKETS.matcher(filePattern)).matches() ) {
-            def prefix = matcher.group(1)
-            if( prefix ) {
-                i = prefix.contains('/') ? prefix.lastIndexOf('/') : -1
-            }
-            else {
-                i = matcher.start(2) -1
-            }
-        }
-        else {
-            i = filePattern.lastIndexOf('/')
-        }
-
-        if( i != -1 ) {
-            folder = filePattern.substring(0,i+1)
-            pattern = filePattern.substring(i+1)
-        }
-        else {
-            folder = './'
-            pattern = filePattern
-        }
-
-        return [ folder, pattern, scheme ]
     }
 
 
@@ -883,12 +834,15 @@ class FileHelper {
 
     /**
      * Delete a path or a directory. If the directory is not empty
-     * delete all the content of the directory
+     * delete all the content of the directory.
+     *
+     * Note when the path is a symlink, it only remove the link without
+     * following affecting the target path
      *
      * @param path
      */
     static void deletePath( Path path ) {
-        def attr = FilesEx.readAttributes(path)
+        def attr = readAttributes(path, LinkOption.NOFOLLOW_LINKS)
         if( !attr )
             return
 
@@ -913,5 +867,50 @@ class FileHelper {
         })
     }
 
+    /**
+     * List the content of a file system path
+     *
+     * @param path
+     *      The system system directory to list
+     * @return
+     *      The stdout produced the execute `ls -la` command.
+     *      NOTE: this output is not supposed to be exhaustive, only the first
+     *      50 lines will be returned.
+     */
+    static String listDirectory(Path path) {
+
+        String result = null
+        Process process = null
+        final target = Escape.path(path)
+        try {
+            process = Runtime.runtime.exec(['sh', '-c', "ls -la ${target} | head -n 50"] as String[])
+            process.waitForOrKill(1_000)
+            def listStatus = process.exitValue()
+            if( listStatus>0 ) {
+                log.debug "Can't list folder: ${target} -- Exit status: $listStatus"
+            }
+            else {
+                result = process.text
+            }
+        }
+        catch( IOException e ) {
+            log.debug "Can't list folder: $target -- Cause: ${e.message ?: e.toString()}"
+        }
+        finally {
+            process?.destroy()
+        }
+
+        return result
+    }
+
+    static BasicFileAttributes readAttributes(Path path, LinkOption... options) {
+        try {
+            Files.readAttributes(path,BasicFileAttributes,options)
+        }
+        catch( IOException e ) {
+            log.trace "Unable to read attributes for file: $path"
+            return null
+        }
+    }
 
 }

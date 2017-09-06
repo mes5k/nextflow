@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -22,20 +22,14 @@ package nextflow.executor
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import nextflow.processor.TaskHandler
+import nextflow.processor.TaskId
 import nextflow.processor.TaskMonitor
 import nextflow.processor.TaskPollingMonitor
 import nextflow.processor.TaskRun
+import nextflow.scheduler.Protocol.TaskHolder
 import nextflow.script.ScriptType
 import nextflow.util.Duration
-import org.apache.ignite.IgniteException
-import org.apache.ignite.cluster.ClusterNode
-import org.apache.ignite.compute.ComputeJob
-import org.apache.ignite.compute.ComputeLoadBalancer
-import org.apache.ignite.compute.ComputeTaskAdapter
-import org.apache.ignite.lang.IgniteCallable
-import org.apache.ignite.lang.IgniteFuture
-import org.apache.ignite.resources.LoadBalancerResource
-import org.jetbrains.annotations.Nullable
+import nextflow.util.ServiceName
 /**
  * A Nextflow executor based on Ignite services
  *
@@ -63,7 +57,7 @@ class IgExecutor extends Executor {
      */
     @Override
     protected TaskMonitor createTaskMonitor() {
-        TaskPollingMonitor.create(session, name, Duration.of('5s'))
+        TaskPollingMonitor.create(session, name, 100, Duration.of('5s'))
     }
 
 
@@ -88,57 +82,36 @@ class IgExecutor extends Executor {
     }
 
     @PackageScope
-    IgniteFuture call( IgniteCallable command ) {
-        final compute = connector.compute().withAsync()
-        compute.call(command)
-        return compute.future()
+    void execute( IgBaseTask task ) {
+        connector.schedule(task)
     }
 
     @PackageScope
-    IgniteFuture execute( ComputeJob task ) {
-        final compute = connector.compute().withAsync()
-        compute.execute( new IgniteTaskWrapper(task), null)
-        compute.future()
+    boolean checkTaskStarted( TaskId taskId ) {
+        connector.checkTaskStarted(taskId)
     }
 
     @PackageScope
-    boolean checkTaskStarted( taskId ) {
-        connector.runningTasks.containsKey(taskId)
+    boolean checkTaskCompleted( TaskId taskId ) {
+        connector.checkTaskCompleted(taskId)
+    }
+
+    boolean checkTaskFailed( TaskId taskId ) {
+        connector.checkTaskFailed(taskId)
     }
 
     @PackageScope
-    void removeTaskCompleted( taskId ) {
-        connector.runningTasks.remove(taskId)
+    TaskHolder removeTaskCompleted( TaskId taskId ) {
+        connector.removeTaskCompleted(taskId)
     }
 
-    /**
-     * An adapter for Ignite compute task
-     *
-     */
-    static class IgniteTaskWrapper extends ComputeTaskAdapter  {
+    @PackageScope
+    void cancelTask( TaskId taskId ) {
+        connector.cancelTask(taskId)
+    }
 
-        // Inject load balancer.
-        @LoadBalancerResource
-        transient ComputeLoadBalancer balancer
-
-        private ComputeJob theJob
-
-        IgniteTaskWrapper( ComputeJob job ) {
-            this.theJob = job
-        }
-
-        @Override
-        Map<? extends ComputeJob, ClusterNode> map(List<ClusterNode> nodes, @Nullable Object arg) throws IgniteException {
-
-            Map<ComputeJob, ClusterNode> jobUnit = [:]
-            jobUnit.put(theJob, balancer.getBalancedNode(theJob, null))
-            return jobUnit
-        }
-
-        @Override
-        Object reduce(List list) throws IgniteException {
-            return list.get(0)
-        }
+    String dumpQueueStatus() {
+        connector.dumpScheduledTasksStatus()
     }
 
 }

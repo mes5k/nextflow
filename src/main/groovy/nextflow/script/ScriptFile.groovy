@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -25,6 +25,7 @@ import java.nio.file.Path
 import groovy.transform.CompileStatic
 import groovy.transform.ToString
 import nextflow.scm.AssetManager
+import nextflow.util.CacheHelper
 
 /**
  * Runnable pipeline script file
@@ -66,9 +67,15 @@ class ScriptFile {
     String getText() { main?.text }
 
     /**
-     * @return Repository commitId
+     * @return The repository commitId
      */
-    String getCommitId() { revisionInfo?.commitId }
+    String getCommitId() {
+        revisionInfo?.commitId
+    }
+
+    String getScriptId() {
+        main ? CacheHelper.hasher(main.text).hash().toString() : null
+    }
 
     /**
      * @return Repository tag or branch
@@ -78,6 +85,7 @@ class ScriptFile {
     ScriptFile( File file ) {
         assert file
         main = file.toPath().complete()
+        localPath = main.parent
     }
 
 }

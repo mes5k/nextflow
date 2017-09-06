@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -160,7 +160,7 @@ class CondorExecutorTest extends Specification {
         def executor = [:] as CondorExecutor
 
         expect:
-        executor.getKillCommand() == 'condor_rm'
+        executor.getKillCommand() == ['condor_rm']
 
     }
 

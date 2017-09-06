@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -40,7 +40,7 @@ import nextflow.config.ConfigBuilder
 @Parameters(commandDescription = "Print a project configuration")
 class CmdConfig extends CmdBase {
 
-    static final NAME = 'config'
+    static final public NAME = 'config'
 
     @Parameter(description = 'project name')
     List<String> args = []
@@ -71,7 +71,7 @@ class CmdConfig extends CmdBase {
                 .build()
 
         PrintWriter stdout = new PrintWriter(System.out,true);
-        config.writeTo( stdout )
+        config.toConfigObject().writeTo( stdout )
     }
 
 

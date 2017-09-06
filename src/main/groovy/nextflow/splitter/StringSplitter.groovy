@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -45,15 +45,12 @@ class StringSplitter extends AbstractTextSplitter {
      * accepted parameter names, the values the valid values for each of them.
      */
     @Override
-    protected Map<String,?> validOptions() {
+    protected Map<String,Object> validOptions() {
         def result = super.validOptions()
         result.ignoreNewLine = Boolean
         return result
     }
 
-    protected CollectorStrategy createCollector() {
-        count > 1 ? new CharSequenceCollector() : null
-    }
 
     @Override
     protected fetchRecord(BufferedReader targetObject) {

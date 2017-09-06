@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -20,9 +20,8 @@
 
 package nextflow.util
 
-import spock.lang.Ignore
+import nextflow.container.ContainerConfig
 import spock.lang.Specification
-
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -117,20 +116,44 @@ class KryoHelperTest extends  Specification {
         !copy.is(bag)
     }
 
-    @Ignore
-    def testClosureSerialization() {
+    def testSerializeContainerConfig() {
 
-        setup:
-        def x = 1
-        def y = 2
-        def f = { return x+y }
+        given:
+        def cfg = new ContainerConfig([enabled: true, engine: 'docker', xxx: 'hello'])
+        when:
+        def copy = KryoHelper.deserialize(KryoHelper.serialize(cfg))
+        then:
+        copy == cfg
+        copy instanceof ContainerConfig
+        copy.engine == 'docker'
+        copy.enabled == true
+        copy.xxx == 'hello'
+
+    }
+
+    def 'should serialised a tuple array' () {
+
+        given:
+        def tuple = new ArrayTuple(['alpha','beta',null,'gamma'])
+        when:
+        def buffer = KryoHelper.serialize(tuple)
+        then:
+        KryoHelper.deserialize(buffer) == tuple
+        KryoHelper.deserialize(buffer) instanceof ArrayTuple
+
+    }
+
+    def 'should serialise a map entry' () {
+
+        given:
+        def map = [foo:1]
 
         when:
-        def buffer = KryoHelper.serialize(f)
-        def copy = (Closure)KryoHelper.deserialize(buffer)
-
+        def entry = map.entrySet().iterator().next()
+        def buffer = KryoHelper.serialize(entry)
         then:
-        copy.call() == 3
+        KryoHelper.deserialize(buffer) instanceof Map.Entry
+        KryoHelper.deserialize(buffer) == entry
 
     }
 

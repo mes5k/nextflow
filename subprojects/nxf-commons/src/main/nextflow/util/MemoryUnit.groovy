@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -33,13 +33,13 @@ import groovy.transform.EqualsAndHashCode
  */
 @CompileStatic
 @EqualsAndHashCode(includes = 'size')
-class MemoryUnit implements Comparable<MemoryUnit>, Serializable {
+class MemoryUnit implements Comparable<MemoryUnit>, Serializable, Cloneable {
 
-    static private final Pattern FORMAT = ~/([0-9\.]+)\s*(\S)?B?/
+    final static public MemoryUnit ZERO = new MemoryUnit(0)
 
-    static public final List UNITS = [ "B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB" ]
+    final static private Pattern FORMAT = ~/([0-9\.]+)\s*(\S)?B?/
 
-    final static int KB = 1024
+    final static public List UNITS = [ "B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB" ]
 
     final long size
 
@@ -118,7 +118,7 @@ class MemoryUnit implements Comparable<MemoryUnit>, Serializable {
     }
 
     def multiply( Number value ) {
-        return new MemoryUnit( size * value )
+        return new MemoryUnit( (long)(size * value) )
     }
 
     def div( Number value ) {
@@ -146,5 +146,9 @@ class MemoryUnit implements Comparable<MemoryUnit>, Serializable {
 
     static of( long value ) {
         new MemoryUnit(value)
+    }
+
+    boolean asBoolean() {
+        return size != 0
     }
 }

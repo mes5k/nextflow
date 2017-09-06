@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -521,7 +521,8 @@ class AssetManager {
             // make sure it contains a valid repository
             checkValidRemoteRepo()
 
-            log.debug "Pulling $project -- Using remote clone url: ${getGitRepositoryUrl()}"
+            final cloneURL = getGitRepositoryUrl()
+            log.debug "Pulling $project -- Using remote clone url: ${cloneURL}"
 
             // clone it
             def clone = Git.cloneRepository()
@@ -533,12 +534,12 @@ class AssetManager {
             }
 
             clone
-                .setURI(getGitRepositoryUrl())
+                .setURI(cloneURL)
                 .setDirectory(localPath)
                 .call()
 
             // return status message
-            return "downloaded from ${gitRepositoryUrl}"
+            return "downloaded from ${cloneURL}"
         }
 
 
@@ -629,7 +630,7 @@ class AssetManager {
             return null
 
         if( head.isSymbolic() ) {
-            return new RevisionInfo(head.objectId.name()?.substring(0,10), Repository.shortenRefName(head.getTarget().getName()))
+            return new RevisionInfo(head.objectId.name(), Repository.shortenRefName(head.getTarget().getName()))
         }
 
         if( !head.getObjectId() )
@@ -639,10 +640,10 @@ class AssetManager {
         Map<ObjectId, String> allNames = git.nameRev().addPrefix( "refs/tags/" ).add(head.objectId).call()
         def name = allNames.get( head.objectId )
         if( name ) {
-            return new RevisionInfo(head.objectId.name()?.substring(0,10), name)
+            return new RevisionInfo(head.objectId.name(), name)
         }
         else {
-            return new RevisionInfo(head.objectId.name()?.substring(0,10))
+            return new RevisionInfo(head.objectId.name())
         }
     }
 
@@ -867,7 +868,7 @@ class AssetManager {
             }
 
             if( revision ) {
-                return "${commitId} [${revision}]"
+                return "${commitId.substring(0,10)} [${revision}]"
             }
 
             commitId

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -102,8 +102,8 @@ class CondorExecutor extends AbstractGridExecutor {
     }
 
     @Override
-    protected String getKillCommand() {
-        'condor_rm'
+    protected List<String> getKillCommand() {
+        ['condor_rm']
     }
 
     @Override
@@ -124,7 +124,7 @@ class CondorExecutor extends AbstractGridExecutor {
 
 
     @Override
-    protected Map<?, QueueStatus> parseQueueStatus(String text) {
+    protected Map<String, QueueStatus> parseQueueStatus(String text) {
         def result = [:]
         if( !text ) return result
 

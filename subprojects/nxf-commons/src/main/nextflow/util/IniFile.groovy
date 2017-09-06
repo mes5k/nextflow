@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -38,7 +38,7 @@ class IniFile {
 
     private Pattern fSection = Pattern.compile( "\\s*\\[([^]]*)\\]\\s*" );
     private Pattern fKeyValue = Pattern.compile( "\\s*([^=]*)=(.*)" );
-    private Map< String, Map< String, String >> fEntries = new HashMap<>();
+    private Map<String, Map<String, String>> fEntries = new HashMap<>();
 
     private Path fFile;
 
@@ -153,7 +153,7 @@ class IniFile {
 
     Map<String,String> section(String section) {
         def result = fEntries.get(section)
-        return result != null ? Collections.unmodifiableMap(result) : [:]
+        return result != null ? Collections.unmodifiableMap(result) : Collections.<String,String>emptyMap()
     }
 
     def propertyMissing(String name) {

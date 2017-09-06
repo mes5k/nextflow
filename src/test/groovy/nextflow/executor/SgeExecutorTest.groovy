@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -49,7 +49,6 @@ class SgeExecutorTest extends Specification {
         // mock process
         def proc = Mock(TaskProcessor)
 
-        // LSF executor
         def executor = [:] as SgeExecutor
         def task = new TaskRun()
         task.processor = proc
@@ -70,7 +69,6 @@ class SgeExecutorTest extends Specification {
                 #$ -o /abc/.command.log
                 #$ -j y
                 #$ -terse
-                #$ -V
                 #$ -notify
                 #$ -q my-queue
                 '''
@@ -87,7 +85,6 @@ class SgeExecutorTest extends Specification {
                 #$ -o /abc/.command.log
                 #$ -j y
                 #$ -terse
-                #$ -V
                 #$ -notify
                 #$ -q my-queue
                 '''
@@ -107,7 +104,6 @@ class SgeExecutorTest extends Specification {
                 #$ -o /abc/.command.log
                 #$ -j y
                 #$ -terse
-                #$ -V
                 #$ -notify
                 #$ -q my-queue
                 #$ -l h_rt=00:00:10
@@ -131,7 +127,6 @@ class SgeExecutorTest extends Specification {
                 #$ -o /abc/.command.log
                 #$ -j y
                 #$ -terse
-                #$ -V
                 #$ -notify
                 #$ -q my-queue
                 #$ -l h_rt=00:10:00
@@ -156,7 +151,6 @@ class SgeExecutorTest extends Specification {
                 #$ -o /abc/.command.log
                 #$ -j y
                 #$ -terse
-                #$ -V
                 #$ -notify
                 #$ -q my-queue
                 #$ -pe smp 1
@@ -180,7 +174,6 @@ class SgeExecutorTest extends Specification {
                 #$ -o /abc/.command.log
                 #$ -j y
                 #$ -terse
-                #$ -V
                 #$ -notify
                 #$ -q my-queue
                 #$ -pe mpi 2
@@ -204,7 +197,6 @@ class SgeExecutorTest extends Specification {
                 #$ -o /abc/.command.log
                 #$ -j y
                 #$ -terse
-                #$ -V
                 #$ -notify
                 #$ -q my-queue
                 #$ -pe orte 4
@@ -215,6 +207,39 @@ class SgeExecutorTest extends Specification {
 
     }
 
+    def testWorkDirWithBlanks() {
+
+        given:
+        def config
+        // mock process
+        def proc = Mock(TaskProcessor)
+
+        def executor = [:] as SgeExecutor
+        def task = new TaskRun()
+        task.processor = proc
+        task.workDir = Paths.get('/work/dir with/blanks')
+        task.name = 'the task name'
+
+        when:
+
+        // config
+        config = task.config = new TaskConfig()
+        config.queue = 'my-queue'
+        config.name = 'task'
+
+        then:
+        executor.getHeaders(task) == '''
+                #$ -wd "/work/dir with/blanks"
+                #$ -N nf-the_task_name
+                #$ -o "/work/dir with/blanks/.command.log"
+                #$ -j y
+                #$ -terse
+                #$ -notify
+                #$ -q my-queue
+                '''
+                .stripIndent().leftTrim()
+
+    }
 
     def testParseJobId() {
 
@@ -311,9 +336,9 @@ class SgeExecutorTest extends Specification {
 
 
         when:
-        executor.fQueueStatus = executor.parseQueueStatus(text)
+        def status = executor.parseQueueStatus(text)
         then:
-        executor.dumpQueueStatus().readLines().sort() == [
+        executor.dumpQueueStatus(status).readLines().sort() == [
                 '  job: 7548318: RUNNING',
                 '  job: 7548348: RUNNING',
                 '  job: 7548349: HOLD',

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -37,7 +37,7 @@ import nextflow.scm.AssetManager
 @Parameters(commandDescription = "View project script file(s)")
 class CmdView extends CmdBase {
 
-    static final NAME = 'view'
+    static final public NAME = 'view'
 
     @Override
     String getName() { NAME }
@@ -71,14 +71,14 @@ class CmdView extends CmdBase {
             /*
              * prints the script main file
              */
-            def script = manager.getMainScriptFile()
+            final script = manager.getMainScriptFile()
             if( !script.exists() )
                 throw new AbortOperationException("Missing script file: '${script}'")
 
             if( !quiet )
                 println "== content of file: $script"
 
-            script.eachLine { println it }
+            script.readLines().each { println it }
         }
 
     }

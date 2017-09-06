@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -26,7 +26,7 @@ import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import nextflow.config.ConfigBuilder
 import nextflow.daemon.DaemonLauncher
-import nextflow.executor.ServiceName
+import nextflow.util.ServiceName
 import nextflow.util.ServiceDiscover
 /**
  * CLI-command NODE
@@ -37,7 +37,7 @@ import nextflow.util.ServiceDiscover
 @Parameters
 class CmdNode extends CmdBase {
 
-    static final NAME = 'node'
+    static final public NAME = 'node'
 
     @Override
     final String getName() { NAME }
@@ -71,7 +71,6 @@ class CmdNode extends CmdBase {
                             .setOptions(launcher.options)
                             .setCmdNode(this)
                             .build()
-                            .toMap()
 
         DaemonLauncher instance
         if( name ) {

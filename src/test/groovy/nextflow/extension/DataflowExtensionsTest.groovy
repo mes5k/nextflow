@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,10 +21,10 @@
 package nextflow.extension
 import java.nio.file.Paths
 
-import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.dataflow.DataflowVariable
 import nextflow.Channel
 import nextflow.Session
+import spock.lang.Ignore
 import spock.lang.Specification
 import spock.lang.Timeout
 /**
@@ -37,28 +37,6 @@ class DataflowExtensionsTest extends Specification {
         new Session()
     }
 
-    def testHandlerNames() {
-
-        when:
-        DataflowExtensions.checkSubscribeHandlers( [:] )
-        then:
-        thrown(IllegalArgumentException)
-
-        when:
-        DataflowExtensions.checkSubscribeHandlers( [ onNext:{}] )
-        then:
-        true
-
-        when:
-        DataflowExtensions.checkSubscribeHandlers( [ onNext:{}, xxx:{}] )
-        then:
-        thrown(IllegalArgumentException)
-
-        when:
-        DataflowExtensions.checkSubscribeHandlers( [ xxx:{}] )
-        then:
-        thrown(IllegalArgumentException)
-    }
 
     def testFilter() {
 
@@ -244,6 +222,11 @@ class DataflowExtensionsTest extends Specification {
         result.val == 3
         result.val == Channel.STOP
 
+        when:
+        result = Channel.value().close().flatMap()
+        then:
+        result.val == Channel.STOP
+
     }
 
     def testMapManyWithTuples () {
@@ -401,47 +384,16 @@ class DataflowExtensionsTest extends Specification {
     }
 
 
-    def testMin() {
 
-        expect:
-        Channel.from(4,1,7,5).min().val == 1
-        Channel.from("hello","hi","hey").min { it.size() } .val == "hi"
-        Channel.from("hello","hi","hey").min { a,b -> a.size()<=>b.size() } .val == "hi"
-        Channel.from("hello","hi","hey").min { a,b -> a.size()<=>b.size() } .val == "hi"
-        Channel.from("hello","hi","hey").min ({ a,b -> a.size()<=>b.size() } as Comparator) .val == "hi"
-
-    }
-
-    def testMax() {
-        expect:
-        Channel.from(4,1,7,5).max().val == 7
-        Channel.from("hello","hi","hey").max { it.size() } .val == "hello"
-        Channel.from("hello","hi","hey").max { a,b -> a.size()<=>b.size() } .val == "hello"
-        Channel.from("hello","hi","hey").max { a,b -> a.size()<=>b.size() } .val == "hello"
-        Channel.from("hello","hi","hey").max ({ a,b -> a.size()<=>b.size() } as Comparator) .val == "hello"
-
-    }
-
-    def testSum() {
-        expect:
-        Channel.from(4,1,7,5).sum().val == 17
-        Channel.from(4,1,7,5).sum { it * 2 } .val == 34
-        Channel.from( [1,1,1], [0,1,2], [10,20,30] ). sum() .val == [ 11, 22, 33 ]
-    }
-
-
-    def testMean() {
-        expect:
-        Channel.from(10,20,30).mean().val == 20
-        Channel.from(10,20,30).mean { it * 2 }.val == 40
-        Channel.from( [10,20,30], [10, 10, 10 ], [10, 30, 50]).mean().val == [10, 20, 30]
-    }
 
     def testCount() {
         expect:
         Channel.from(4,1,7,5).count().val == 4
         Channel.from(4,1,7,1,1).count(1).val == 3
         Channel.from('a','c','c','q','b').count ( ~/c/ ) .val == 2
+        Channel.value(5).count().val == 1
+        Channel.value(5).count(5).val == 1
+        Channel.value(5).count(6).val == 0
     }
 
     def testCountBy() {
@@ -490,6 +442,7 @@ class DataflowExtensionsTest extends Specification {
 
     }
 
+    @Ignore()
     def testRouteBy() {
 
         when:
@@ -505,6 +458,7 @@ class DataflowExtensionsTest extends Specification {
 
     }
 
+    @Ignore
     def testRouteByMap() {
 
         setup:
@@ -582,26 +536,29 @@ class DataflowExtensionsTest extends Specification {
     def testSpread() {
 
         when:
-        def r1 = Channel.from(1,2,3).spread(['a','b'])
+        def left = Channel.from(1,2,3)
+        def right = ['aa','bb']
+        def r1 = left.spread(right)
         then:
-        r1.val == [1, 'a']
-        r1.val == [1, 'b']
-        r1.val == [2, 'a']
-        r1.val == [2, 'b']
-        r1.val == [3, 'a']
-        r1.val == [3, 'b']
+        r1.val == [1, 'aa']
+        r1.val == [1, 'bb']
+        r1.val == [2, 'aa']
+        r1.val == [2, 'bb']
+        r1.val == [3, 'aa']
+        r1.val == [3, 'bb']
         r1.val == Channel.STOP
 
         when:
-        def str = Channel.from('a','b','c')
-        def r2 = Channel.from(1,2).spread(str)
+        left = Channel.from(1,2)
+        right = Channel.from('a','bb','ccc')
+        def r2 = left.spread(right)
         then:
         r2.val == [1, 'a']
-        r2.val == [1, 'b']
-        r2.val == [1, 'c']
+        r2.val == [1, 'bb']
+        r2.val == [1, 'ccc']
         r2.val == [2, 'a']
-        r2.val == [2, 'b']
-        r2.val == [2, 'c']
+        r2.val == [2, 'bb']
+        r2.val == [2, 'ccc']
         r2.val == Channel.STOP
 
     }
@@ -683,6 +640,46 @@ class DataflowExtensionsTest extends Specification {
         result.val == Channel.STOP
     }
 
+    def testSpreadWithPath() {
+        given:
+        def path1 = Paths.get('/some/data/file1')
+        def path2 = Paths.get('/some/data/file2')
+
+        when:
+        def result = Channel.from(1,2,3).spread( Channel.value(path1) )
+        then:
+        result.val == [1, path1]
+        result.val == [2, path1]
+        result.val == [3, path1]
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.from(1,2,3).spread( ['abc'] )
+        then:
+        result.val == [1, 'abc']
+        result.val == [2, 'abc']
+        result.val == [3, 'abc']
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.from(1,2,3).spread( Channel.value('abc') )
+        then:
+        result.val == [1, 'abc']
+        result.val == [2, 'abc']
+        result.val == [3, 'abc']
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.from(1,2).spread( Channel.from(path1,path2) )
+        then:
+        result.val == [1, path1]
+        result.val == [1, path2]
+        result.val == [2, path1]
+        result.val == [2, path2]
+        result.val == Channel.STOP
+
+    }
+
     def testFlatten() {
 
         when:
@@ -721,15 +718,6 @@ class DataflowExtensionsTest extends Specification {
         r4.val == 5
         r4.val == 6
         r4.val == Channel.STOP
-
-        when:
-        def r5 = Channel.value( [1,2,3] ).flatten()
-        then:
-        r5.val == 1
-        r5.val == 2
-        r5.val == 3
-        r5.val == Channel.STOP
-
     }
 
     @Timeout(1)
@@ -741,6 +729,11 @@ class DataflowExtensionsTest extends Specification {
         result.val == 2
         result.val == 1
         result.val == Channel.STOP
+
+        when:
+        result = Channel.value().close().flatten()
+        then:
+        result.val ==  Channel.STOP
     }
 
     def testCollate() {
@@ -944,55 +937,6 @@ class DataflowExtensionsTest extends Specification {
     }
 
 
-    def testPhaseImpl() {
-
-        setup:
-        def result = null
-        def ch1 = new DataflowQueue()
-        def ch2 = new DataflowQueue()
-        def ch3 = new DataflowQueue()
-
-        when:
-        def map = [ : ]
-        result = PhaseOp.phaseImpl(map, 2, 0, 'a', { it })
-        then:
-        result == null
-        map == [ a:[0: ['a']] ]
-
-        when:
-        map = [ : ]
-        result = PhaseOp.phaseImpl(map, 2, 0, 'a', { it })
-        result = PhaseOp.phaseImpl(map, 2, 1, 'a', { it })
-        then:
-        result == ['a','a']
-        map == [ a:[:] ]
-
-
-        when:
-        def r1
-        def r2
-        def r3
-        map = [ : ]
-        r1 = PhaseOp.phaseImpl(map, 3, 0, 'a', { it })
-        r1 = PhaseOp.phaseImpl(map, 3, 1, 'a', { it })
-        r1 = PhaseOp.phaseImpl(map, 3, 2, 'a', { it })
-
-        r2 = PhaseOp.phaseImpl(map, 3, 0, 'b', { it })
-        r2 = PhaseOp.phaseImpl(map, 3, 1, 'b', { it })
-        r2 = PhaseOp.phaseImpl(map, 3, 2, 'b', { it })
-
-        r3 = PhaseOp.phaseImpl(map, 3, 0, 'z', { it })
-        r3 = PhaseOp.phaseImpl(map, 3, 1, 'z', { it })
-        r3 = PhaseOp.phaseImpl(map, 3, 1, 'z', { it })
-        r3 = PhaseOp.phaseImpl(map, 3, 2, 'z', { it })
-
-        then:
-        r1 == ['a','a','a']
-        r2 == ['b','b','b']
-        r3 == ['z','z','z']
-        map == [ a:[:], b:[:], z:[ 1:['z']] ]
-
-    }
 
     def testDefaultMappingClosure() {
 
@@ -1030,82 +974,6 @@ class DataflowExtensionsTest extends Specification {
         DataflowExtensions.DEFAULT_MAPPING_CLOSURE.call( 99 ) == 99
         DataflowExtensions.DEFAULT_MAPPING_CLOSURE.call( 99, 2 ) == null
 
-    }
-
-    def testPhase() {
-
-        setup:
-        def ch1 = Channel.from( 1,2,3 )
-        def ch2 = Channel.from( 1,0,0,2,7,8,9,3 )
-
-        when:
-        def result = ch1.phase(ch2)
-        then:
-        result.val == [1,1]
-        result.val == [2,2]
-        result.val == [3,3]
-
-        result.val == Channel.STOP
-
-
-        when:
-        ch1 = Channel.from( [sequence: 'aaaaaa', key: 1], [sequence: 'bbbbbb', key: 2] )
-        ch2 = Channel.from( [val: 'zzzz', id: 3], [val: 'xxxxx', id: 1], [val: 'yyyyy', id: 2])
-        result = ch1.phase(ch2) { Map it ->
-            if( it.containsKey('key') ) {
-                return it.key
-            }
-            else if( it.containsKey('id') ) {
-                return it.id
-            }
-            return null
-        }
-        then:
-
-        result.val == [ [sequence: 'aaaaaa', key: 1], [val: 'xxxxx', id: 1] ]
-        result.val == [ [sequence: 'bbbbbb', key: 2], [val: 'yyyyy', id: 2] ]
-        result.val == Channel.STOP
-
-    }
-
-    def testPhaseWithRemainder() {
-
-        def ch1
-        def ch2
-        def result
-
-        when:
-        ch1 = Channel.from( 1,2,3 )
-        ch2 = Channel.from( 1,0,0,2,7,8,9,3 )
-        result = ch1.phase(ch2, remainder: true)
-
-        then:
-        result.val == [1,1]
-        result.val == [2,2]
-        result.val == [3,3]
-        result.val == [null,0]
-        result.val == [null,0]
-        result.val == [null,7]
-        result.val == [null,8]
-        result.val == [null,9]
-        result.val == Channel.STOP
-
-
-        when:
-        ch1 = Channel.from( 1,0,0,2,7,8,9,3 )
-        ch2 = Channel.from( 1,2,3 )
-        result = ch1.phase(ch2, remainder: true)
-
-        then:
-        result.val == [1,1]
-        result.val == [2,2]
-        result.val == [3,3]
-        result.val == [0,null]
-        result.val == [0,null]
-        result.val == [7,null]
-        result.val == [8,null]
-        result.val == [9,null]
-        result.val == Channel.STOP
     }
 
 
@@ -1428,6 +1296,18 @@ class DataflowExtensionsTest extends Specification {
         result.val == 3
         result.val == Channel.STOP
 
+        when:
+        result = Channel.value(1).ifEmpty(100)
+        then:
+        result instanceof DataflowVariable
+        result.val == 1
+
+        when:
+        result = Channel.value().close().ifEmpty(100)
+        then:
+        result instanceof DataflowVariable
+        result.val == 100
+
     }
 
     def 'should create a channel given a list'() {
@@ -1442,21 +1322,32 @@ class DataflowExtensionsTest extends Specification {
 
     }
 
+    @Timeout(1)
     def 'should close the dataflow channel' () {
 
-        given:
+        when:
         def source = Channel.create()
         source << 10
         source << 20
         source << 30
         def result = source.close()
-
-        expect:
+        then:
         result.is source
         result.val == 10
         result.val == 20
         result.val == 30
         result.val == Channel.STOP
+
+        when:
+        source = Channel.value().close()
+        then:
+        source.val == Channel.STOP
+
+        when:
+        source = Channel.value(1).close()
+        then:
+        source.val == 1
+
     }
 
     def 'should assign a channel to new variable' () {
@@ -1499,9 +1390,7 @@ class DataflowExtensionsTest extends Specification {
         x.val == 'Hello'
         x.val == 'Hello'
         x.val == 'Hello'
-
     }
-
 
     def 'should emit channel items until the condition is verified' () {
 
@@ -1521,5 +1410,6 @@ class DataflowExtensionsTest extends Specification {
         result.val == Channel.STOP
 
     }
+
 
 }

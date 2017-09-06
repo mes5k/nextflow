@@ -6,6 +6,8 @@ set -u
 # DEFINE the following variables
 #
 
+#X_RUN=<unique id of the execution>
+
 #AWS_ACCESS_KEY_ID=xxx
 #AWS_SECRET_ACCESS_KEY=yyy
 #X_AMI=<image ID eg. ami-f71a7f80>
@@ -13,6 +15,7 @@ set -u
 #X_SECURITY=<security group e.g sg-72b74a05>
 #X_KEY=<security key name>
 #X_BUCKET=<s3 bucket where nodes share their IPs in order to discover each other>
+#X_SUBNET=<vpc subnet id>
 
 # only for spot instances
 #X_ZONE=eu-west-1c
@@ -24,6 +27,10 @@ set -u
 # only required to mount instance storage
 #X_DEVICE=/dev/xvdc
 #X_MOUNT=/mnt/scratch
+
+# EFS file system
+#X_EFS_ID=fs-xxx
+#X_EFS_MOUNT=/mnt/efs
 
 # nextflow details
 #NXF_VER=0.17.3
@@ -38,6 +45,7 @@ set -u
 #DOCKER_VERSION=1.10.3
 
 # Print the current status
+echo "Run           : $X_RUN"
 echo "AMI           : $X_AMI"
 echo "Instance type : $X_TYPE"
 echo "Security group: $X_SECURITY"
@@ -46,6 +54,8 @@ echo "S3 join bucket: $X_BUCKET"
 
 set +u
 echo "Root storage  : $X_STORAGE GB"
+echo "EFS ID        : ${X_EFS_ID:--}"
+echo "EFS mount     : ${X_EFS_MOUNT:--} "
 
 if [[ $3 == '--spot' ]]; then
   X_SPOT=true 
@@ -81,9 +91,41 @@ function get_abs_filename() {
 function cloudInit() {
 
 local role=$1
-cat << EndOfString
+
+#
+# create the cloud boothook file
+#
+local boothook=$(mktemp)
+
+if [[ $X_EFS_ID && $X_EFS_MOUNT ]]; then
+cat <<EndOfString >>$boothook
+zone="\$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+region="\${zone::-1}"
+yum install -y nfs-utils
+mkdir -p $X_EFS_MOUNT
+mount -t nfs4 -o nfsvers=4.1 \${zone}.${X_EFS_ID}.efs.\${region}.amazonaws.com:/ $X_EFS_MOUNT
+chown ec2-user:ec2-user $X_EFS_MOUNT
+chmod 775 $X_EFS_MOUNT
+EndOfString
+fi
+
+if [[ $X_TYPE == r3.* && $X_DEVICE && $X_MOUNT ]]; then
+cat <<EndOfString >>$boothook
+mkfs.ext4 -E nodiscard $X_DEVICE
+mkdir -p $X_MOUNT
+mount -o discard $X_DEVICE $X_MOUNT
+chown -R ec2-user:ec2-user $X_MOUNT
+chmod 775 $X_MOUNT
+EndOfString
+fi
+
+#
+# create the script-shell  file
+#
+local scriptschell=$(mktemp)
+cat <<EndOfString >> $scriptschell
 #!/bin/bash
-su - ec2-user << 'EOF'
+su - ec2-user << 'EndOfScript'
 export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
 export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
 export AWS_S3BUCKET="$AWS_S3BUCKET"
@@ -98,9 +140,23 @@ export NXF_TRACE="$NXF_TRACE"
 export X_TYPE="$X_TYPE"
 export X_MOUNT="$X_MOUNT"
 export X_DEVICE="$X_DEVICE"
-curl -fsSL https://raw.githubusercontent.com/nextflow-io/nextflow/master/cloud/cloud-boot.sh | bash &> ~ec2-user/boot.log
-EOF
+export X_EFS_ID="$X_EFS_ID"
+export X_EFS_MOUNT="$X_EFS_MOUNT"
+export X_RUN="$X_RUN"
+(
+$(cat ./cloud-boot.sh)
+) &> ~ec2-user/boot.log
+EndOfScript
 EndOfString
+
+#
+# combine the two file as mime-multipart content user-data
+#
+if [[ -s $boothook ]]; then
+  ./mimetext.py $scriptschell:x-shellscript $boothook:cloud-boothook
+else
+  ./mimetext.py $scriptschell:x-shellscript
+fi
 
 }
 
@@ -165,6 +221,10 @@ function runInstances() {
     cli+=(--key-name); cli+=("$X_KEY")
     cli+=(--user-data); cli+=("$(cloudInit $role)")
 
+    if [[ $X_SUBNET ]]; then
+    cli+=(--subnet-id); cli+=("$X_SUBNET")
+    fi
+
     if [[ $X_DEVICE || $X_STORAGE ]]; then
     cli+=(--block-device-mappings); cli+=("[$(getDeviceMapping)]")
     fi
@@ -185,12 +245,16 @@ if [[ $X_DEVICE || $X_STORAGE ]]; then
 local mapping="\"BlockDeviceMappings\": [$(getDeviceMapping)], "
 fi
 
+if [[ $X_SUBNET ]]; then
+local subnet="\"SubnetId\": \"$X_SUBNET\", "
+fi
+
 TMPFILE=$(mktemp)
 cat >$TMPFILE <<EOF 
 {
   "ImageId": "$X_AMI",
   "KeyName": "$X_KEY",
-  "SecurityGroupIds": [ "$X_SECURITY" ],
+  "SecurityGroupIds": [ "$X_SECURITY" ], $subnet
   "InstanceType": "$X_TYPE",
   "UserData": "$(cloudInit $role | base64)", $mapping
   "Placement": {

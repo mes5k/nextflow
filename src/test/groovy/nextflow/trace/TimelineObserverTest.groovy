@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -24,6 +24,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 import nextflow.processor.TaskHandler
+import nextflow.processor.TaskId
 import spock.lang.Specification
 import test.TestHelper
 
@@ -75,6 +76,7 @@ class TimelineObserverTest extends Specification {
         r3.process = 'beta'
 
         def observer = [:] as TimelineObserver
+        observer.beginMillis = 1000
         observer.startMillis = 1000
         observer.endMillis = 3500
         observer.records['1'] = r1
@@ -100,12 +102,12 @@ class TimelineObserverTest extends Specification {
         given:
         def now = 1429821425141
         def r1 = new TraceRecord()
-        r1.task_id = '1'
+        r1.task_id = TaskId.of(1)
         r1.name = 'foo'
         r1.process = 'alpha'
 
         def r2 = new TraceRecord()
-        r2.task_id = '2'
+        r2.task_id = TaskId.of(2)
         r2.name = 'bar'
         r2.submit = now
         r2.start = now + 100
@@ -115,7 +117,7 @@ class TimelineObserverTest extends Specification {
         r2.process = 'alpha'
 
         def r3 = new TraceRecord()
-        r3.task_id = '3'
+        r3.task_id = TaskId.of(3)
         r3.name = 'baz'
         r3.submit = now
         r3.start = now + 200
@@ -125,15 +127,15 @@ class TimelineObserverTest extends Specification {
         r3.process = 'beta'
 
         def h1 = Mock(TaskHandler)
-        h1.getTask() >> [id: '1']
+        h1.getTask() >> [id: TaskId.of(1)]
         h1.getTraceRecord() >> r1
 
         def h2 = Mock(TaskHandler)
-        h2.getTask() >> [id: '2']
+        h2.getTask() >> [id: TaskId.of(2)]
         h2.getTraceRecord() >> r2
 
         def h3 = Mock(TaskHandler)
-        h3.getTask() >> [id: '3']
+        h3.getTask() >> [id: TaskId.of(3)]
         h3.getTraceRecord() >> r3
 
         when:
@@ -142,9 +144,9 @@ class TimelineObserverTest extends Specification {
         observer.onProcessComplete(h2)
         observer.onProcessComplete(h3)
         then:
-        observer.records['1'] == r1
-        observer.records['2'] == r2
-        observer.records['3'] == r3
+        observer.records[TaskId.of(1)] == r1
+        observer.records[TaskId.of(2)] == r2
+        observer.records[TaskId.of(3)] == r3
 
     }
 
@@ -179,6 +181,7 @@ class TimelineObserverTest extends Specification {
 
         def file = TestHelper.createInMemTempFile('report.html')
         def observer = new TimelineObserver(file)
+        observer.beginMillis = 1000
         observer.startMillis = 1000
         observer.endMillis = 3500
         observer.records['1'] = r1
@@ -192,8 +195,8 @@ class TimelineObserverTest extends Specification {
         file.text == '''
 <!doctype html>
 <!--
-  ~ Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
-  ~ Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+  ~ Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+  ~ Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
   ~
   ~   This file is part of 'Nextflow'.
   ~
@@ -213,12 +216,12 @@ class TimelineObserverTest extends Specification {
 
 <html>
 <head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <script type="text/javascript">
 var prot = (("https:" == document.location.protocol) ? "https://" : "http://");
 document.write(unescape("%3Cscript src='" + prot + "code.jquery.com/jquery-latest.min.js' type='text/javascript' %3E%3C/script%3E"));
 document.write(unescape("%3Cscript src='" + prot + "d3js.org/d3.v3.min.js' charset='utf-8' type='text/javascript' %3E%3C/script%3E"));
 document.write(unescape("%3Cscript src='" + prot + "cdn.rawgit.com/nextflow-io/d3-timeline/82622c4cc35bac7283b3a317826b0709ac1ae476/src/d3-timeline.js' type='text/javascript' %3E%3C/script%3E"));
-document.write(unescape("%3Clink href='" + prot + "fonts.googleapis.com/css?family=Lato' rel='stylesheet' type='text/css' %3E%3C/link%3E"));
 </script>
 <style type="text/css">
 * {
@@ -270,6 +273,7 @@ var handler=null;
 // see https://github.com/mbostock/d3/wiki/Ordinal-Scales#category20c
 var colors = d3.scale.category20c().domain(d3.range(0,20)).range()
 
+function c0(index) { return "#9c9c9c"; }
 function c1(index) { return "#bdbdbd"; }
 function c2(index) { return colors[index % 16]; } // <-- note: uses only the first 16 colors
 
@@ -316,10 +320,19 @@ function getTickFormat() {
     }
   }
 
+  if( delta <= 7 * DAY ) {
+    return {
+      format: d3.time.format("%b %e %H:%M"),
+      tickTime: d3.time.hours,
+      tickInterval: 6,
+      tickSize: 6
+    }
+  }
+
   return {
-    format: d3.time.format("%b %e %H:%M"),
-    tickTime: d3.time.hours,
-    tickInterval: 6,
+    format: d3.time.format("%b %e"),
+    tickTime: d3.time.days,
+    tickInterval: 1,
     tickSize: 6
   }
 }
@@ -377,6 +390,11 @@ $(window).resize(hrz); // resize the applet on window resize
 <div id='footer'>
   Created with Nextflow -- <a href='http://www.nextflow.io' target='_blank'>http://nextflow.io</a>
 </div>
+
+<script type="text/javascript">
+var prot = (("https:" == document.location.protocol) ? "https://" : "http://");
+document.write(unescape("%3Clink href='" + prot + "fonts.googleapis.com/css?family=Lato' rel='stylesheet' type='text/css' %3E%3C/link%3E"));
+</script>
 </body>
 </html>
         '''.stripIndent().trim()

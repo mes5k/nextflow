@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -22,6 +22,7 @@ package nextflow.executor
 import java.nio.file.Files
 
 import nextflow.processor.TaskConfig
+import nextflow.processor.TaskId
 import nextflow.processor.TaskProcessor
 import nextflow.processor.TaskRun
 import nextflow.processor.TaskStatus
@@ -43,7 +44,7 @@ class DrmaaExecutorTest extends Specification {
         def workDir = Files.createTempDirectory('temp')
         //def config = new TaskConfig([:])
         def executor = [:] as DrmaaExecutor
-        def task = new TaskRun(id: 100, name: 'Hello', workDir: workDir, script: 'echo hello', config: [:])
+        def task = new TaskRun(id: TaskId.of(100), name: 'Hello', workDir: workDir, script: 'echo hello', config: [:])
         task.processor = Mock(TaskProcessor)
         task.processor.getProcessEnvironment() >> [:]
         task.processor.getSession() >> new nextflow.Session()
@@ -72,7 +73,7 @@ class DrmaaExecutorTest extends Specification {
         drmaa.createJobTemplate() >> { template }
         drmaa.runJob(_) >> '12345'
 
-        def task = new TaskRun(id:1, name: 'hello', workDir: workDir, config: [queue: 'short'])
+        def task = new TaskRun(id: TaskId.of(1), name: 'hello', workDir: workDir, config: [queue: 'short'])
         def executor = [ getDrmaaSession: { drmaa } ] as DrmaaExecutor
 
         def handler = new DrmaaTaskHandler(task, executor)
@@ -100,7 +101,7 @@ class DrmaaExecutorTest extends Specification {
         given:
         def workDir = Files.createTempDirectory('test')
         def executor = [:] as DrmaaExecutor
-        def task = new TaskRun(id:1, name: 'hello', workDir: workDir)
+        def task = new TaskRun(id: TaskId.of(1), name: 'hello', workDir: workDir)
         def handler = new DrmaaTaskHandler(task, executor)
         def config = task.config = new TaskConfig()
         when:
@@ -132,8 +133,10 @@ class DrmaaExecutorTest extends Specification {
     def testHandlerGetTrace() {
 
         given:
+        def workDir = Files.createTempDirectory('test')
+
         def expected = new TraceRecord()
-        expected.task_id = 30
+        expected.task_id = TaskId.of(30)
         expected.native_id = '2000'
         expected.hash = '123abc'
         expected.name = 'hello (1)'
@@ -146,11 +149,12 @@ class DrmaaExecutorTest extends Specification {
         expected.module = []
         expected.container = null
         expected.attempt = 1
-
-        def workDir = Files.createTempDirectory('test')
+        expected.workdir = workDir.toString()
+        expected.script = null
+        expected.scratch = null
 
         def task = [:] as TaskRun
-        task.id = 30
+        task.id = TaskId.of(30)
         task.workDir = workDir
         task.exitStatus = 99
         task.config = new TaskConfig(tag: 'seq1')

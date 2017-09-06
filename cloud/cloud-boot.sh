@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 set -e
 set -x 
 
@@ -25,23 +24,19 @@ instance="$(curl -s http://169.254.169.254/latest/meta-data/instance-id)"
 zone="$(curl -s 169.254.169.254/latest/meta-data/placement/availability-zone)"
 region="${zone::-1}"
 aws ec2 --region "$region" create-tags --resources "$instance" --tags "Key=Name,Value=$NXF_ROLE"
+aws ec2 --region "$region" create-tags --resources "$instance" --tags "Key=Cluster,Value=$X_RUN"
 
 #
 # mount instance storage
 #
-if [[ $X_TYPE == r3.* && $X_DEVICE && $X_MOUNT ]]; then
-sudo mkfs.ext4 -E nodiscard $X_DEVICE
-sudo mkdir -p $X_MOUNT
-sudo mount -o discard $X_DEVICE $X_MOUNT
-sudo chown -R ec2-user:ec2-user $X_MOUNT
-sudo chmod 775 $X_MOUNT
+if [[ $X_DEVICE && $X_MOUNT ]]; then
 # set nextflow scratch path to the mounted storage
 export NXF_TEMP=$X_MOUNT
 echo "export NXF_TEMP=$X_MOUNT" >> $HOME/.bash_profile
 fi
 
 #
-# Update docker
+# Update docker (see https://get.docker.com/builds/ for details)
 #
 if [[ $DOCKER_VERSION ]]; then
 sudo service docker stop
@@ -79,10 +74,19 @@ chmod +x $HOME/nextflow
 [[ $NXF_PULL ]] && $HOME/nextflow pull "$NXF_PULL"
 
 # launch the nextflow daemon
-if [[ $NXF_ROLE != master ]]; then 
-  bash -x $HOME/nextflow node -bg -cluster.join "s3:$AWS_S3BUCKET" -cluster.interface eth0
-fi 
+cluster_join="s3:$AWS_S3BUCKET"
+cluster_work="s3://<your-bucket/work>"
+if [[ $X_EFS_ID && $X_EFS_MOUNT ]]; then
+  [[ $X_RUN ]] && cluster_join="path:$X_EFS_MOUNT/cluster/$X_RUN"
+  cluster_work=$X_EFS_MOUNT/work
+fi
+
+if [[ $NXF_ROLE == worker ]]; then
+  bash -x $HOME/nextflow node -bg -cluster.join "$cluster_join" -cluster.interface eth0
+fi
 
 # save the environment for debugging 
 env | sort > boot.env
 
+# just a marker file
+touch READY

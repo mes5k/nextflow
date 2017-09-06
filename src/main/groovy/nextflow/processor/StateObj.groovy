@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -39,11 +39,9 @@ class StateObj implements Serializable, Cloneable {
     private int submitted
     private int completed
     private boolean poisoned
-    private boolean allScalarValues
     private String name
 
-    StateObj( boolean allScalarValues = false, String name = null ) {
-        this.allScalarValues = allScalarValues
+    StateObj( String name = null ) {
         this.name = name
     }
 
@@ -52,29 +50,28 @@ class StateObj implements Serializable, Cloneable {
      */
     void incSubmitted() {
         if( poisoned )
-            throw new IllegalStateException("Cannot receive more message after Poison-Pill has arrived")
-
-        submitted++
+            log.debug "Oops.. Cannot process more messages after Poison-Pill was received"
+        else
+            submitted++
     }
 
     /**
      * Increment the number of completed tasks
      */
     void incCompleted() {
-        if( completed < submitted )
-            completed++
-
-        else
-            throw new IllegalStateException("Processed messages ($submitted) cannot overcome received messages ($submitted)")
+        if( completed >= submitted ) {
+            log.debug "Oops.. Processed messages ($submitted) should not overcome received messages ($submitted) count"
+        }
+        completed++
     }
 
     void poison() {
-        log.debug "<$name> State before poison: $this"
+        log.trace "<$name> State before poison: $this"
         poisoned = true
     }
 
     boolean isFinished() {
-        (allScalarValues || poisoned) && (submitted == completed)
+        poisoned && (submitted == completed)
     }
 
     StateObj clone() {
@@ -82,13 +79,12 @@ class StateObj implements Serializable, Cloneable {
         result.submitted = this.submitted
         result.completed = this.completed
         result.poisoned = this.poisoned
-        result.allScalarValues = this.allScalarValues
         result.name = this.name
         return result
     }
 
     String toString() {
-        "${getClass().simpleName}[submitted: $submitted; completed: $completed; poisoned: $poisoned; allScalar: $allScalarValues]"
+        "${getClass().simpleName}[submitted: $submitted; completed: $completed; poisoned: $poisoned ]"
     }
 
 }

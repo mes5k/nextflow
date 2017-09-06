@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -25,9 +25,12 @@ import groovy.transform.InheritConstructors
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import groovyx.gpars.dataflow.DataflowQueue
+import groovyx.gpars.dataflow.DataflowVariable
 import groovyx.gpars.dataflow.DataflowWriteChannel
 import nextflow.exception.IllegalFileException
+import nextflow.file.FilePatternSplitter
 import nextflow.processor.ProcessConfig
+import nextflow.util.BlankSeparatedList
 /**
  * Model a process generic input parameter
  *
@@ -64,6 +67,7 @@ interface OutParam {
     short getIndex()
 
     Mode getMode()
+
 }
 
 enum BasicMode implements OutParam.Mode {
@@ -98,8 +102,8 @@ abstract class BaseOutParam extends BaseParam implements OutParam {
 
     protected OutParam.Mode mode = BasicMode.standard
 
-    /** Whenever the channel has to closed on task termination */
-    protected Boolean autoClose = Boolean.TRUE
+    @PackageScope
+    boolean singleton
 
     BaseOutParam( Binding binding, List list, short ownerIndex = -1) {
         super(binding,list,ownerIndex)
@@ -124,20 +128,71 @@ abstract class BaseOutParam extends BaseParam implements OutParam {
     }
 
     @PackageScope
-    void lazyInitImpl( def target ) {
+    void setSingleton( boolean value ) {
+        this.singleton = value
+    }
 
+    @PackageScope
+    void lazyInitImpl( def target ) {
         def channel = null
         if( target instanceof TokenVar ) {
-            channel = outputValToChannel(target.name, DataflowQueue)
+            channel = outputValToChannel(target.name)
         }
         else if( target != null ) {
-            channel = outputValToChannel(target, DataflowQueue)
+            channel = outputValToChannel(target)
         }
 
         if( channel ) {
             outChannels.add(channel)
         }
+    }
 
+    /**
+     * Creates a channel variable in the script context
+     *
+     * @param channel it can be a string representing a channel variable name in the script context. If
+     *      the variable does not exist it creates a {@code DataflowVariable} in the script with that name.
+     *      If the specified {@code value} is a {@code DataflowWriteChannel} object, use this object
+     *      as the output channel
+     *
+     * @param factory The type of the channel to create, either {@code DataflowVariable} or {@code DataflowQueue}
+     * @return The created (or specified) channel instance
+     */
+    final protected DataflowWriteChannel outputValToChannel( Object channel ) {
+
+        if( channel instanceof String ) {
+            // the channel is specified by name
+            def local = channel
+
+            // look for that name in the 'script' context
+            channel = binding.hasVariable(local) ? binding.getVariable(local) : null
+            if( channel instanceof DataflowWriteChannel ) {
+                // that's OK -- nothing to do
+            }
+            else {
+                if( channel == null ) {
+                    log.trace "Creating new output channel > $local"
+                }
+                else {
+                    log.warn "Output channel `$local` overrides another variable with the same name declared in the script context -- Rename it to avoid possible conflicts"
+                }
+
+                // instantiate the new channel
+                channel = singleton && mode==BasicMode.standard ? new DataflowVariable() : new DataflowQueue()
+
+                // bind it to the script on-fly
+                if( local != '-' && binding ) {
+                    // bind the outputs to the script scope
+                    binding.setVariable(local, channel)
+                }
+            }
+        }
+
+        if( channel instanceof DataflowWriteChannel ) {
+            return channel
+        }
+
+        throw new IllegalArgumentException("Invalid output channel reference")
     }
 
 
@@ -191,18 +246,44 @@ abstract class BaseOutParam extends BaseParam implements OutParam {
 
 }
 
+/**
+ * Implements an optional file output option
+ */
+trait OptionalParam {
+
+    private boolean optional
+
+    boolean getOptional() { optional }
+
+    def optional( boolean value ) {
+        this.optional = value
+        return this
+    }
+
+}
+
+/**
+ * Placeholder trait to mark a missing optional output parameter
+ */
+trait MissingParam {
+
+    OutParam missing
+
+}
 
 /**
  * Model a process *file* output parameter
  */
 @Slf4j
 @InheritConstructors
-class FileOutParam extends BaseOutParam implements OutParam {
+class FileOutParam extends BaseOutParam implements OutParam, OptionalParam {
 
     /**
      * ONLY FOR TESTING DO NOT USE
      */
-    protected FileOutParam(Map params) { }
+    protected FileOutParam(Map params) {
+        super(new Binding(), [])
+    }
 
     /**
      * The character used to separate multiple names (pattern) in the output specification
@@ -237,9 +318,13 @@ class FileOutParam extends BaseOutParam implements OutParam {
      */
     protected boolean followLinks = true
 
+    protected boolean glob = true
+
     private GString gstring
 
     private Closure<String> dynamicObj
+
+    private String filePattern
 
     String getSeparatorChar() { separatorChar }
 
@@ -252,6 +337,8 @@ class FileOutParam extends BaseOutParam implements OutParam {
     Integer getMaxDepth() { maxDepth }
 
     boolean getFollowLinks() { followLinks }
+
+    boolean getGlob() { glob }
 
 
     /**
@@ -295,6 +382,10 @@ class FileOutParam extends BaseOutParam implements OutParam {
         return this
     }
 
+    FileOutParam glob( boolean value ) {
+        glob = value
+        return this
+    }
 
     BaseOutParam bind( obj ) {
 
@@ -314,8 +405,8 @@ class FileOutParam extends BaseOutParam implements OutParam {
             return this
         }
 
-        // fallback on super class
-        super.bind(obj)
+        this.filePattern = obj.toString()
+        return this
     }
 
     List<String> getFilePatterns(Map context, Path workDir) {
@@ -335,7 +426,7 @@ class FileOutParam extends BaseOutParam implements OutParam {
             }
         }
         else {
-            entry = nameObj
+            entry = filePattern
         }
 
         if( !entry )
@@ -343,6 +434,11 @@ class FileOutParam extends BaseOutParam implements OutParam {
 
         if( entry instanceof Path )
             return [ relativize(entry, workDir) ]
+
+        // handle a collection of files
+        if( entry instanceof BlankSeparatedList || entry instanceof List ) {
+            return entry.collect { relativize(it.toString(), workDir) }
+        }
 
         // normalize to a string object
         final nameString = entry.toString()
@@ -354,6 +450,8 @@ class FileOutParam extends BaseOutParam implements OutParam {
 
     }
 
+    @PackageScope String getFilePattern() { filePattern }
+
     @PackageScope
     static String clean(String path) {
         while (path.startsWith('/') ) {
@@ -363,7 +461,7 @@ class FileOutParam extends BaseOutParam implements OutParam {
     }
 
     @PackageScope
-    static String relativize(String path, Path workDir) {
+    String relativize(String path, Path workDir) {
         if( !path.startsWith('/') )
             return path
 
@@ -378,9 +476,9 @@ class FileOutParam extends BaseOutParam implements OutParam {
     }
 
     @PackageScope
-    static String relativize(Path path, Path workDir) {
+    String relativize(Path path, Path workDir) {
         if( !path.isAbsolute() )
-            return path.toString()
+            return glob ? FilePatternSplitter.GLOB.escape(path) : path
 
         if( !path.startsWith(workDir) )
             throw new IllegalFileException("File `$path` is out of the scope of process working dir: $workDir")
@@ -388,7 +486,8 @@ class FileOutParam extends BaseOutParam implements OutParam {
         if( path.nameCount == workDir.nameCount )
             throw new IllegalFileException("Missing output file name")
 
-        return path.subpath(workDir.getNameCount(), path.getNameCount()).toString()
+        final rel = path.subpath(workDir.getNameCount(), path.getNameCount())
+        return glob ? FilePatternSplitter.GLOB.escape(rel) : rel
     }
 
     /**
@@ -461,7 +560,7 @@ class StdOutParam extends BaseOutParam { }
 
 
 @InheritConstructors
-class SetOutParam extends BaseOutParam {
+class SetOutParam extends BaseOutParam implements OptionalParam {
 
     enum CombineMode implements OutParam.Mode { combine }
 
@@ -488,7 +587,7 @@ class SetOutParam extends BaseOutParam {
                 create(FileOutParam).bind(item)
 
             else if( item instanceof TokenFileCall )
-                // note that 'filePattern' can be a string or a Gstring
+                // note that 'filePattern' can be a string or a GString
                 create(FileOutParam).bind(item.target)
 
             else
@@ -502,7 +601,15 @@ class SetOutParam extends BaseOutParam {
         type.newInstance(binding,inner,index)
     }
 
-    def SetOutParam mode( def value ) {
+    @Override
+    void lazyInit() {
+        super.lazyInit()
+        inner.each { opt ->
+            if( opt instanceof FileOutParam ) opt.optional(this.optional)
+        }
+    }
+
+    SetOutParam mode( def value ) {
 
         def str = value instanceof String ? value : ( value instanceof TokenVar ? value.name : null )
         if( str ) {
@@ -520,10 +627,10 @@ class SetOutParam extends BaseOutParam {
 
 final class DefaultOutParam extends StdOutParam {
 
-    DefaultOutParam( ProcessConfig config, target ) {
+    DefaultOutParam( ProcessConfig config ) {
         super(config)
         bind('-')
-        into(target)
+        into(new DataflowQueue())
     }
 }
 
@@ -547,4 +654,7 @@ class OutputsList implements List<OutParam> {
         (List<T>) target.findAll { it.class in classes }
     }
 
+    void setSingleton( boolean value ) {
+        target.each { BaseOutParam param -> param.singleton = value }
+    }
 }

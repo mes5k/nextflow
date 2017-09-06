@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -61,7 +61,7 @@ class DotRenderer implements DagRenderer {
         return result.join('\n')
     }
 
-    private static String renderVertex(vertex) {
+    private static String renderVertex(DAG.Vertex vertex) {
 
         List attrs = []
 
@@ -109,7 +109,7 @@ class DotRenderer implements DagRenderer {
         return attrs ? "${vertex.getName()} [${attrs.join(',')}];" : null
     }
 
-    private static String renderEdge(edge) {
+    private static String renderEdge(DAG.Edge edge) {
         assert edge.from != null && edge.to != null
 
         String A = renderVertex( edge.from )

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -28,16 +28,12 @@ import java.nio.file.Path
 
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
-import nextflow.exception.ProcessException
 import nextflow.file.FileHelper
 import nextflow.processor.TaskContext
 import nextflow.processor.TaskHandler
 import nextflow.processor.TaskRun
 import nextflow.script.ScriptType
 import nextflow.util.Duration
-import org.apache.ignite.compute.ComputeJobResult
-import org.apache.ignite.lang.IgniteFuture
-import org.apache.ignite.lang.IgniteInClosure
 /**
  * A task handler for Ignite  cluster
  *
@@ -62,11 +58,6 @@ class IgTaskHandler extends TaskHandler {
     private Path errorFile
 
     private long begin
-
-    /**
-     * The result object for this task
-     */
-    private volatile IgniteFuture future
 
     static IgTaskHandler createScriptHandler( TaskRun task, IgExecutor executor ) {
         def handler = new IgTaskHandler(task)
@@ -96,9 +87,7 @@ class IgTaskHandler extends TaskHandler {
         // submit to a Ignite node for execution
         final sessionId = task.processor.session.uniqueId
         final remoteTask = type == ScriptType.SCRIPTLET ? new IgScriptTask(task,sessionId) : new IgClosureTask(task,sessionId)
-        future = executor.execute( remoteTask )
-
-        future.listen( { executor.getTaskMonitor().signal(); } as IgniteInClosure )
+        executor.execute( remoteTask )
 
         // mark as submitted -- transition to STARTED has to be managed by the scheduler
         status = SUBMITTED
@@ -117,29 +106,25 @@ class IgTaskHandler extends TaskHandler {
     }
 
     private boolean isStarted() {
-
-        if( !future )
-            return false
-
-        return executor.checkTaskStarted(task.id)
+        executor.checkTaskStarted(task.id)
     }
 
     @Override
     boolean checkIfCompleted() {
 
-        if( isRunning() && (future.isCancelled() || (future.isDone() && (!exitFile || readExitStatus()!=null)))  ) {
-            log.trace "Task DONE > ${task}"
-            status = COMPLETED
-            executor.removeTaskCompleted(task.id)
+        if( isRunning() && executor.checkTaskCompleted(task.id) ) {
 
-            final result = (ComputeJobResult)future.get()
-            if( result.getException() ) {
-                task.error = result.getException()
-                return true
+            if( !executor.checkTaskFailed(task.id) && exitFile && readExitStatus()==null ) {
+                // continue to wait for a valid exit status
+                return false
             }
 
-            if( result.isCancelled() ) {
-                task.error = ProcessException.CANCELLED_ERROR
+            log.trace "Task DONE > ${task}"
+            status = COMPLETED
+            final holder = executor.removeTaskCompleted(task.id)
+
+            if( holder.error ) {
+                task.error = holder.error
                 return true
             }
 
@@ -147,10 +132,10 @@ class IgTaskHandler extends TaskHandler {
             if( isScriptlet() ) {
                 task.stdout = outputFile
                 task.stderr = errorFile
-                task.exitStatus = result.getData() as Integer
+                task.exitStatus = holder.result as Integer
             }
             else {
-                def data = result.getData() as IgResultData
+                def data = holder.result as IgResultData
                 task.stdout = data.value
                 task.context = new TaskContext( task.processor, data.context )
             }
@@ -162,11 +147,27 @@ class IgTaskHandler extends TaskHandler {
 
     protected Integer readExitStatus() {
 
+        String workDirList = null
+        if( !begin ) {
+            begin = System.currentTimeMillis()
+        }
+        else {
+            /*
+             * When the file is in a NFS folder in order to avoid false negative
+             * list the content of the parent path to force refresh of NFS metadata
+             * http://stackoverflow.com/questions/3833127/alternative-to-file-exists-in-java
+             * http://superuser.com/questions/422061/how-to-determine-whether-a-directory-is-on-an-nfs-mounted-drive
+             */
+            workDirList = FileHelper.listDirectory(task.workDir)
+        }
+
         // read the exit status from the exit file
         final exitStatus = safeReadExitStatus()
+        if( exitStatus != null )
+            return exitStatus
 
         if( !FileHelper.workDirIsNFS ) {
-            return exitStatus != null ? exitStatus : Integer.MAX_VALUE
+            return Integer.MAX_VALUE
         }
 
         /*
@@ -176,47 +177,24 @@ class IgTaskHandler extends TaskHandler {
          * Continue to check until a timeout is reached
          */
 
-        if( !begin ) {
-            begin = System.currentTimeMillis()
-        }
-
         def delta = System.currentTimeMillis() - begin
-        if( status == null ) {
-            if( delta>timeout ) {
-                // game-over
-                log.warn "Unable to read command status from: $exitFile after $delta ms"
-                return Integer.MAX_VALUE
-            }
-            log.debug "Command exit file is empty: $exitFile after $delta ms -- Try to wait a while and .. pray."
-            return null
+        if( delta > timeout ) {
+            // game-over
+            def errMessage = []
+            errMessage << "Failed to get exist status for process ${this} -- exit-status-read-timeout=${Duration.of(timeout)}; delta=${Duration.of(delta)}"
+            // -- dump current queue stats
+            errMessage << "Current queue status:"
+            errMessage << executor.dumpQueueStatus()?.indent('> ')
+            // -- dump directory listing
+            errMessage << "Content of workDir: ${task.workDir}"
+            errMessage << workDirList?.indent('> ')
+            log.debug errMessage.join('\n')
+
+            return Integer.MAX_VALUE
         }
 
-        // the exit status is not null, before return check also if expected output files are available
-
-        /*
-         * When the file is in a NFS folder in order to avoid false negative
-         * list the content of the parent path to force refresh of NFS metadata
-         * http://stackoverflow.com/questions/3833127/alternative-to-file-exists-in-java
-         * http://superuser.com/questions/422061/how-to-determine-whether-a-directory-is-on-an-nfs-mounted-drive
-         */
-        final process = Runtime.runtime.exec("ls -la ${task.targetDir}")
-        final listStatus = process.waitFor()
-
-        if( listStatus>0 ) {
-            log.debug "Can't list command target folder (exit: $listStatus): ${task.targetDir}"
-            if( delta>timeout ) {
-                return Integer.MAX_VALUE
-            }
-            return null
-        }
-
-        if( log.isTraceEnabled() ) {
-            log.trace "List target folder: ${task.targetDir}\n${process.text?.indent('  ')}\n"
-        }
-        // destroy the process
-        process.destroy()
-
-        return exitStatus
+        log.debug "Command exit file is empty: $exitFile after ${Duration.of(delta)} -- Try to wait a while and .. pray."
+        return null
     }
 
 
@@ -234,7 +212,7 @@ class IgTaskHandler extends TaskHandler {
             return null
         }
 
-        if( status ) {
+        if( status != null ) {
             try {
                 return status.toInteger()
             }
@@ -249,7 +227,7 @@ class IgTaskHandler extends TaskHandler {
 
     @Override
     void kill() {
-        future?.cancel()
+        executor.cancelTask(task.id)
     }
 
     /**

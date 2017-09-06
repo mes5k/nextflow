@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,7 +21,6 @@
 package nextflow.executor
 import java.nio.file.Path
 
-import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import nextflow.processor.TaskRun
 /**
@@ -42,11 +41,9 @@ class PbsExecutor extends AbstractGridExecutor {
     protected List<String> getDirectives( TaskRun task, List<String> result ) {
         assert result !=null
 
-        result << '-d' << task.workDir.toString()
         result << '-N' << getJobNameFor(task)
-        result << '-o' << task.workDir.resolve(TaskRun.CMD_LOG).toString()
+        result << '-o' << quote(task.workDir.resolve(TaskRun.CMD_LOG))
         result << '-j' << 'oe'
-        result << '-V' << ''
 
         // the requested queue name
         if( task.config.queue ) {
@@ -76,6 +73,21 @@ class PbsExecutor extends AbstractGridExecutor {
         return result
     }
 
+    @Override
+    String getHeaders( TaskRun task ) {
+        String result = super.getHeaders(task)
+        result += "cd ${quote(task.workDir)}\n"
+        return result
+    }
+
+    @Override
+    String getJobNameFor( TaskRun task ) {
+        def result = super.getJobNameFor(task)
+        // some implementations do not allow parenthesis in the job name -- see #271
+        result = result.replace('(','').replace(')','')
+        // PBS does not allow more than 15 characters for the job name string
+        result && result.size()>15 ? result.substring(0,15) : result
+    }
     /**
      * The command line to submit this job
      *
@@ -84,7 +96,9 @@ class PbsExecutor extends AbstractGridExecutor {
      * @return A list representing the submit command line
      */
     List<String> getSubmitCommandLine(TaskRun task, Path scriptFile ) {
-        [ 'qsub', scriptFile.getName() ]
+        // in some PBS implementation the submit command will fail if the script name starts with a dot eg `.command.run`
+        // add the `-N <job name>` to fix this -- see issue #228
+        [ 'qsub', '-N', getJobNameFor(task), scriptFile.getName() ]
     }
 
     protected String getHeaderToken() { '#PBS' }
@@ -106,9 +120,8 @@ class PbsExecutor extends AbstractGridExecutor {
         throw new IllegalStateException("Invalid PBS/Torque submit response:\n$text\n\n")
     }
 
-
-    @PackageScope
-    String getKillCommand() { 'qdel' }
+    @Override
+    protected List<String> getKillCommand() { ['qdel'] }
 
     @Override
     protected List<String> queueStatusCommand(Object queue) {
@@ -126,7 +139,7 @@ class PbsExecutor extends AbstractGridExecutor {
     ]
 
     @Override
-    protected Map<?, QueueStatus> parseQueueStatus(String text) {
+    protected Map<String, QueueStatus> parseQueueStatus(String text) {
 
         final JOB_ID = 'Job Id:'
         final JOB_STATUS = 'job_state ='

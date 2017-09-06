@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -112,7 +112,7 @@ class FilesEx {
      * @return
      */
     def static boolean deleteDir(Path path) {
-        def attr = readAttributes(path)
+        def attr = FileHelper.readAttributes(path)
         if( !attr )
              return true
 
@@ -302,7 +302,6 @@ class FilesEx {
      *   a/b/c.txt --> c
      *   a.txt     --> a
      *   a/b/c     --> c
-     *   a/b/c/    --> ""
      * </pre>
      *
      * The output will be the same irrespective of the machine that the code is running on.
@@ -323,7 +322,6 @@ class FilesEx {
      *   a/b/c.txt --> c
      *   a.txt     --> a
      *   a/b/c     --> c
-     *   a/b/c/    --> ""
      * </pre>
      *
      * The output will be the same irrespective of the machine that the code is running on.
@@ -345,6 +343,61 @@ class FilesEx {
         }
 
         return name.toString()
+    }
+
+    /**
+     * Extend {@code File} adding a {@code getSimpleName()} method which returns the
+     * file base name removing all file extension.
+     *
+     * When a file start starts with a dot character it returns the first name token
+     * after the dot.
+     *
+     * For example:
+     *
+     *  <pre>
+     *   a.txt     --> a
+     *   a.tar.gz  --> a
+     *   a/b/c     --> c
+     *   a/b/c.txt --> c
+     *   /         --> null
+     * </pre>
+     *
+     * @param self The file {@code File}
+     * @return The file simple name string
+     */
+    static String getSimpleName( File self ) {
+        return getSimpleName(self.toPath())
+    }
+
+    /**
+     * Extend {@code Path} adding a {@code getSimpleName()} method which returns the
+     * file base name removing all file extension.
+     *
+     * When a file start starts with a dot character it returns the first name token
+     * after the dot.
+     *
+     * For example:
+     *
+     *  <pre>
+     *   a.txt     --> a
+     *   a.tar.gz  --> a
+     *   a/b/c     --> c
+     *   a/b/c.txt --> c
+     *   /         --> null
+     * </pre>
+     *
+     * @param self The file {@code Path}
+     * @return The file simple name string
+     */
+    static String getSimpleName( Path self ) {
+        assert self
+
+        String name = self.getFileName()
+        if( name?.size() <= 1 )
+            return name
+
+        int pos = name.substring(1).indexOf('.')
+        pos != -1 ? name.substring(0,pos+1) : name
     }
 
     /**
@@ -1306,7 +1359,7 @@ class FilesEx {
      *      {@code overwrite}
      * @param link The {@link Path} of the link to create
      */
-    static void mklink( Path existing, Map opts, Path link ) {
+    static Path mklink( Path existing, Map opts, Path link ) {
         CheckHelper.checkParams('mklink', opts, LINK_PARAMS)
 
         final hard = opts?.hard == true ?: false
@@ -1323,6 +1376,8 @@ class FilesEx {
             Files.delete(link)
             createLinkImpl(existing, link, hard)
         }
+
+        return link
     }
 
     static private void createLinkImpl(Path existing, Path link, boolean hard) {
@@ -1349,27 +1404,27 @@ class FilesEx {
         }
     }
 
-    static void mklink( Path existing, Map opts, File link ) {
+    static Path mklink( Path existing, Map opts, File link ) {
         mklink(existing, opts, link.toPath())
     }
 
-    static void mklink( Path existing, Map opts, String link ) {
+    static Path mklink( Path existing, Map opts, String link ) {
         mklink(existing, opts, existing.getFileSystem().getPath(link))
     }
 
-    static void mklink( Path existing, Path link ) {
+    static Path mklink( Path existing, Path link ) {
         mklink(existing, null, link )
     }
 
-    static void mklink( Path existing, File link ) {
+    static Path mklink( Path existing, File link ) {
         mklink(existing, null, link.toPath())
     }
 
-    static void mklink( Path existing, String link ) {
+    static Path mklink( Path existing, String link ) {
         mklink(existing, null, existing.getFileSystem().getPath(link))
     }
 
-    static void mklink( Path existing, Map opts = null ) {
+    static Path mklink( Path existing, Map opts = null ) {
         mklink(existing,opts,existing.getFileName())
     }
 
@@ -1383,7 +1438,9 @@ class FilesEx {
         self.toAbsolutePath().normalize()
     }
 
+    @Deprecated
     static BasicFileAttributes readAttributes(Path path) {
+        log.warn "Method `readAttributes` is deprecated"
         try {
             Files.readAttributes(path,BasicFileAttributes)
         }
@@ -1401,4 +1458,11 @@ class FilesEx {
         matches(self.toPath(), pattern)
     }
 
+    static URI getUri( Path self ) {
+        self.toUri()
+    }
+
+    static URI getUri( File self ) {
+        self.toURI()
+    }
 }

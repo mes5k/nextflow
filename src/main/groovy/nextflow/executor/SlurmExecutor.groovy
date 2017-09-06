@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -43,9 +43,10 @@ class SlurmExecutor extends AbstractGridExecutor {
      */
     protected List<String> getDirectives(TaskRun task, List<String> result) {
 
-        result << '-D' << task.workDir.toString()
+        result << '-D' << quote(task.workDir)
         result << '-J' << getJobNameFor(task)
-        result << '-o' << task.workDir.resolve(TaskRun.CMD_LOG).toString()           // -o OUTFILE and no -e option => stdout and stderr merged to stdout/OUTFILE
+        result << '-o' << quote(task.workDir.resolve(TaskRun.CMD_LOG))     // -o OUTFILE and no -e option => stdout and stderr merged to stdout/OUTFILE
+        result << '--no-requeue' << '' // note: directive need to be returned as pairs
 
         if( task.config.cpus > 1 ) {
             result << '-c' << task.config.cpus.toString()
@@ -104,22 +105,37 @@ class SlurmExecutor extends AbstractGridExecutor {
             }
         }
 
+        // customised `sbatch` command can return only the jobid
+        def id = text.trim()
+        if( id.isLong() )
+            return id
+
         throw new IllegalStateException("Invalid SLURM submit response:\n$text\n\n")
     }
 
-    protected String getKillCommand() { 'scancel' }
+    @Override
+    protected List<String> getKillCommand() { ['scancel'] }
 
     @Override
     protected List<String> queueStatusCommand(Object queue) {
-        if( queue )
-            log.debug "SLURM executor does not support queue parameter on queue status"
 
-        return ['squeue','-h','-o','%i %t']
+        final result = ['squeue','--noheader','-o','%i %t', '-t', 'all']
+
+        if( queue )
+            result << '-p' << queue.toString()
+
+        final user = System.getProperty('user.name')
+        if( user )
+            result << '-u' << user
+        else
+            log.debug "Cannot retrieve current user"
+
+        return result
     }
 
     /*
      *  Maps SLURM job status to nextflow status
-     *  see https://computing.llnl.gov/linux/slurm/squeue.html#SECTION_JOB%20STATE%20CODES
+     *  see http://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
      */
     static private Map STATUS_MAP = [
             'PD': QueueStatus.PENDING,  // (pending)
@@ -132,11 +148,13 @@ class SlurmExecutor extends AbstractGridExecutor {
             'TO': QueueStatus.ERROR,    // (timeout),
             'NF': QueueStatus.ERROR,    // (node failure)
             'S': QueueStatus.HOLD,      // (job suspended)
+            'ST': QueueStatus.HOLD,     // (stopped)
             'PR': QueueStatus.ERROR,    // (Job terminated due to preemption)
+            'BF': QueueStatus.ERROR,    // (boot fail, Job terminated due to launch failure)
     ]
 
     @Override
-    protected Map<?, QueueStatus> parseQueueStatus(String text) {
+    protected Map<String, QueueStatus> parseQueueStatus(String text) {
 
         def result = [:]
 
@@ -144,6 +162,9 @@ class SlurmExecutor extends AbstractGridExecutor {
             def cols = line.split(/\s+/)
             if( cols.size() == 2 ) {
                 result.put( cols[0], STATUS_MAP.get(cols[1]) )
+            }
+            else {
+                log.debug "[SLURM] invalid status line: `$line`"
             }
         }
 

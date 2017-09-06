@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -35,7 +35,7 @@ import nextflow.scm.AssetManager
 @Parameters(commandDescription = "List all downloaded projects")
 class CmdList extends CmdBase {
 
-    static final NAME = 'list'
+    static final public NAME = 'list'
 
     @Override
     final String getName() { NAME }

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,28 +19,24 @@
  */
 
 package nextflow.executor
-
 import java.nio.file.FileSystems
 import java.nio.file.Path
 
 import groovy.transform.CompileStatic
+import groovy.util.logging.Slf4j
 import nextflow.file.FileHelper
 import nextflow.processor.TaskRun
 import org.apache.ignite.IgniteException
-import org.apache.ignite.IgniteLogger
-import org.apache.ignite.resources.LoggerResource
 /**
  * Execute a remote script task into a remote Ignite cluster node
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
+@Slf4j
 @CompileStatic
 class IgScriptTask extends IgBaseTask<Integer>   {
 
     private static final long serialVersionUID = -5552939711667527410L
-
-    @LoggerResource
-    private transient IgniteLogger log
 
     private transient Process process
 
@@ -60,7 +56,7 @@ class IgScriptTask extends IgBaseTask<Integer>   {
         if( isRemoteWorkDir ) {
             // when work dir is allocated on a `remote` file system path
             // the input files need to be copied locally using a staging strategy
-            stageStrategy = new IgScriptStagingStrategy(log: log, task: bean.clone(), sessionId: sessionId)
+            stageStrategy = new IgScriptStagingStrategy(task: bean.clone(), sessionId: sessionId)
             stageStrategy.stage()
             // note: set staging local dir as task work dir
             localWorkDir = stageStrategy.localWorkDir
@@ -74,6 +70,19 @@ class IgScriptTask extends IgBaseTask<Integer>   {
     protected void afterExecute() {
         if( stageStrategy ) {
             stageStrategy.unstage()
+            cleanupLocalWorkDir()
+        }
+    }
+
+    protected void cleanupLocalWorkDir() {
+        if( bean.cleanup == false ) return
+        try {
+            final cmd = ['bash','-c',"(sudo -n true && sudo rm -rf '$localWorkDir' || rm -rf '$localWorkDir')&>/dev/null"]
+            final status = cmd.execute().waitFor()
+            if( status ) log.debug "Can't cleanup path: $localWorkDir"
+        }
+        catch (Exception e) {
+            log.debug "Error while cleaning-up path: $localWorkDir -- Cause: ${e.message ?: e}"
         }
     }
 
@@ -89,7 +98,7 @@ class IgScriptTask extends IgBaseTask<Integer>   {
             wrapper.workDir = localWorkDir
             wrapper.scratch = null
             // important add the mount for local cached files
-            wrapper.dockerMount = stageStrategy.localCacheDir
+            wrapper.containerMount = stageStrategy.localCacheDir
         }
         else {
             // set a local scratch directory if needed
@@ -105,9 +114,9 @@ class IgScriptTask extends IgBaseTask<Integer>   {
         // NOTE: the actual command is wrapped by another bash whose streams
         // are redirected to null. This is important  to consume the stdout/stderr
         // of the wrapped job otherwise that output will cause the inner `tee`s hang
-        List cmd = ['/bin/bash','-c', job.join(' ') + ' &> /dev/null']
+        List cmd = ['/bin/bash','-c', job.join(' ') + ' &>' + TaskRun.CMD_LOG]
 
-        log.debug "Running task > name: ${bean.name} - workdir: ${localWorkDir} - remote: ${isRemoteWorkDir}"
+        log.debug "Running task > ${bean.name} -- taskId=${taskId}; workdir=${localWorkDir}; remote=${isRemoteWorkDir}"
         ProcessBuilder builder = new ProcessBuilder()
                 .directory(localWorkDir.toFile())
                 .command(cmd)
@@ -120,7 +129,7 @@ class IgScriptTask extends IgBaseTask<Integer>   {
         // make sure to destroy the process and close the streams
         process.destroy()
 
-        log.debug "Completed task > $bean.name - exitStatus: $result"
+        log.debug "Completed task > $bean.name -- taskId=${taskId}; exitStatus=$result"
         // return the exit value
         return result
     }
@@ -128,11 +137,11 @@ class IgScriptTask extends IgBaseTask<Integer>   {
     @Override
     void cancel() {
         if( process ) {
-            log.debug "Cancelling process for task > $bean.name"
+            log.debug "Cancelling process for task > $bean.name -- taskId=${taskId}"
             process.destroy()
         }
         else {
-            log.debug "No process to cancel for task > $bean.name"
+            log.debug "No process to cancel for task > $bean.name -- taskId=${taskId}"
         }
     }
 

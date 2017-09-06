@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -51,7 +51,8 @@ class CollectFileOp {
             sliceMaxSize: Integer,
             sliceMaxItems: Integer,
             deleteTempFilesOnClose: Boolean,
-            cache: [Boolean, String]
+            cache: [Boolean, String],
+            skip: Integer
     ]
 
     private final Map params
@@ -245,14 +246,15 @@ class CollectFileOp {
         collector.seed = params?.seed
         if( params?.deleteTempFilesOnClose != null )
             collector.deleteTempFilesOnClose = params.deleteTempFilesOnClose as boolean
-
+        if( params?.skip )
+            collector.skipLines = params?.skip
 
         return collector
     }
 
 
     DataflowQueue apply() {
-        channel.subscribeImpl ( onNext: this.&processItem, onComplete: this.&emitItems )
+        DataflowHelper.subscribeImpl( channel, [onNext: this.&processItem, onComplete: this.&emitItems] )
         return result
     }
 }

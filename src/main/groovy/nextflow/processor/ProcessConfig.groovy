@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -51,17 +51,18 @@ import nextflow.util.ReadOnlyMap
 @Slf4j
 class ProcessConfig implements Map<String,Object> {
 
-    static final transient BOOL_YES = ['true','yes','on']
+    static final public transient BOOL_YES = ['true','yes','on']
 
-    static final transient BOOL_NO = ['false','no','off']
+    static final public transient BOOL_NO = ['false','no','off']
 
-    static final DIRECTIVES = [
+    static final public List<String> DIRECTIVES = [
             'afterScript',
             'beforeScript',
             'echo',
             'cache',
             'cpus',
             'container',
+            'cleanup',
             'clusterOptions',
             'disk',
             'echo',
@@ -90,7 +91,9 @@ class ProcessConfig implements Map<String,Object> {
             'each',
             'env',
             'stdin',
-            'stdout'
+            'stdout',
+            'stageInMode',
+            'stageOutMode'
     ]
 
     @Delegate
@@ -126,7 +129,7 @@ class ProcessConfig implements Map<String,Object> {
         configProperties.shell = BashWrapperBuilder.BASH
         configProperties.validExitStatus = [0]
         configProperties.maxRetries = 1
-        configProperties.maxErrors = 3
+        configProperties.maxErrors = -1
         configProperties.errorStrategy = ErrorStrategy.TERMINATE
     }
 
@@ -313,8 +316,8 @@ class ProcessConfig implements Map<String,Object> {
         new DefaultInParam(this)
     }
 
-    def void fakeOutput( target ) {
-        new DefaultOutParam(this,target)
+    def void fakeOutput() {
+        new DefaultOutParam(this)
     }
 
 

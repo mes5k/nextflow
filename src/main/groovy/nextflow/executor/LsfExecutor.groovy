@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,9 +21,9 @@
 package nextflow.executor
 import java.nio.file.Path
 
+import groovy.util.logging.Slf4j
 import nextflow.processor.TaskRun
 import nextflow.util.MemoryUnit
-
 /**
  * Processor for LSF resource manager (DRAFT)
  *
@@ -34,6 +34,7 @@ import nextflow.util.MemoryUnit
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
+@Slf4j
 class LsfExecutor extends AbstractGridExecutor {
 
     /**
@@ -128,11 +129,11 @@ class LsfExecutor extends AbstractGridExecutor {
             }
         }
 
-        new IllegalStateException("Invalid LSF submit response:\n$text\n\n");
+        new IllegalStateException("[LSF] Invalid submit response:\n$text\n\n");
     }
 
     @Override
-    String getKillCommand() { 'bkill' }
+    protected List<String> getKillCommand() { ['bkill'] }
 
     @Override
     protected List<String> queueStatusCommand( queue ) {
@@ -159,7 +160,7 @@ class LsfExecutor extends AbstractGridExecutor {
     ]
 
     @Override
-    protected Map<?, QueueStatus> parseQueueStatus(String text) {
+    protected Map<String, QueueStatus> parseQueueStatus(String text) {
 
         def result = [:]
 
@@ -167,6 +168,9 @@ class LsfExecutor extends AbstractGridExecutor {
             def cols = line.split(',')
             if( cols.size() == 3 ) {
                 result.put( cols[0], DECODE_STATUS.get(cols[1]) )
+            }
+            else {
+                log.debug "[LSF] invalid status line: `$line`"
             }
         }
 

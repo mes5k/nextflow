@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -48,22 +48,22 @@ class Const {
     /**
      * The application version
      */
-    static public final String APP_VER = "0.19.3"
+    static public final String APP_VER = "0.25.5"
 
     /**
      * The app build time as linux/unix timestamp
      */
-    static public final long APP_TIMESTAMP = 1465428090311
+    static public final long APP_TIMESTAMP = 1501850627317
 
     /**
      * The app build number
      */
-    static public final int APP_BUILDNUM = 3806
+    static public final int APP_BUILDNUM = 4516
 
     /**
      * The date time formatter string
      */
-    static public final DATETIME_FORMAT = 'dd-MM-yyyy HH:mm'
+    static public final String DATETIME_FORMAT = 'dd-MM-yyyy HH:mm'
 
     /**
      * The app build time string relative to UTC timezone
@@ -121,13 +121,16 @@ class Const {
 
 """
       N E X T F L O W
-      Version ${APP_VER} build ${APP_BUILDNUM}
+      version ${APP_VER} build ${APP_BUILDNUM}
       last modified ${APP_TIMESTAMP_UTC} ${deltaLocal()}
+      cite doi:10.1038/nbt.3820
       http://nextflow.io
 """
 
-    static public final String EXTRAE_TRACE_CLASS = 'nextflow.extrae.ExtraeTraceObserver'
-
     static public final String S3_UPLOADER_CLASS = 'com.upplication.s3fs.S3OutputStream'
+
+    static public final String ROLE_WORKER = 'worker'
+
+    static public final String ROLE_MASTER = 'master'
 
 }

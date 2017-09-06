@@ -29,6 +29,7 @@ The available filter operators are:
 * `filter`_
 * `first`_
 * `last`_
+* `randomSample`_
 * `take`_
 * `unique`_
 
@@ -44,7 +45,7 @@ begins with ``a``::
 
     Channel
         .from( 'a', 'b', 'aa', 'bc', 3, 4.5 )
-        .filter( ~/a+/ )
+        .filter( ~/^a.*/ )
         .subscribe { println it }
 
 ::
@@ -203,6 +204,20 @@ a Java `class` type or any boolean `predicate`. For example::
         .subscribe { println it }
 
 
+randomSample
+------------
+
+The ``randomSample`` operator allows you to create a channel emitting the specified number of items randomly taken
+from the channel to which is applied. For example::
+
+  Channel
+        .from( 1..100 )
+        .randomSample( 10 )
+        .println()
+
+The above snippet will print 10 numbers in the range from 1 to 100.
+
+
 take
 -------
 
@@ -246,6 +261,7 @@ These operators are:
 
 * `buffer`_
 * `collate`_
+* `collect`_
 * `flatten`_
 * `flatMap`_
 * `groupBy`_
@@ -599,6 +615,41 @@ As before, if you don't want to emit the last items which do not complete a tupl
 
 See also: `buffer`_ operator.
 
+collect
+-------
+
+The ``collect`` operator collects all the items emitted by a channel to a ``List`` and return
+the resulting object as a sole emission. For example::
+
+    Channel
+        .from( 1, 2, 3, 4 )
+        .collect()
+        .println()
+
+    # outputs
+    [1,2,3,4]
+
+An optional :ref:`closure <script-closure>` can be specified to transform each item before adding it to the resulting list.
+For example::
+
+    Channel
+        .from( 'hello', 'ciao', 'bonjour' )
+        .collect { it.length() }
+        .println()
+
+    # outputs
+    [5,4,7]
+
+.. Available parameters:
+..
+.. =========== ============================
+.. Field       Description
+.. =========== ============================
+.. flat        When ``true`` nested list structures are normalised and their items are added to the resulting list object (default: ``true``).
+.. sort        When ``true`` the items in the resulting list are sorted by their natural ordering. It is possible to provide a custom ordering criteria by using either a :ref:`closure <script-closure>` or a `Comparator <https://docs.oracle.com/javase/8/docs/api/java/util/Comparator.html>`_ object (default: ``false``).
+.. =========== ============================
+
+See also: `toList`_ and `toSortedList`_ operator.
 
 flatten
 ----------
@@ -641,6 +692,7 @@ and emits the resulting collection as a single item. For example::
     [1,2,3,4]
     Done
 
+See also: `collect`_ operator.
 
 toSortedList
 ---------------
@@ -659,6 +711,18 @@ and emits the resulting collection as a single item. For example::
     [1,2,3,4]
     Done
 
+You may also pass a comparator closure as an argument to the ``toSortedList`` operator to customize the sorting criteria.  For example, to sort by the second element of a tuple in descending order::
+
+    Channel
+        .from( ["homer", 5], ["bart", 2], ["lisa", 10], ["marge", 3], ["maggie", 7])
+        .toSortedList( { a, b -> b[1] <=> a[1] } )
+        .view()
+
+::
+
+   [[lisa, 10], [maggie, 7], [homer, 5], [marge, 3], [bart, 2]]
+
+See also: `collect`_ operator.
 
 Splitting operators
 ====================
@@ -735,7 +799,6 @@ strip       Removes leading and trailing blanks from values (default: ``false``)
 skip        Number of lines since the file beginning to ignore when parsing the CSV content.
 limit       Limits the number of retrieved records to the specified value.
 decompress  When ``true`` decompress the content using the GZIP format before processing it (note: files whose name ends with ``.gz`` extension are decompressed automatically)
-file        When ``true`` saves each split to a file. Use a string instead of ``true`` value to create split files with a specific name (split index number is automatically added). Finally, set this attribute to an existing directory, in oder to save the split files into the specified folder.
 elem        The index of the element to split when the operator is applied to a channel emitting list/tuple objects (default: first file object or first element)
 =========== ============================
 
@@ -756,7 +819,8 @@ each::
         .splitFasta( by: 10 )
         .subscribe { print it }
 
-
+.. warning:: By default chunks are kept in memory. When splitting big files specify the parameter ``file: true`` to save the
+  chunks into files in order to not incur in a ``OutOfMemoryException``. See the available parameter table below for details.
 
 A second version of the ``splitFasta`` operator allows you to split a FASTA content into record objects, instead
 of text chunks. A record object contains a set of fields that let you access and manipulate the FASTA sequence
@@ -824,6 +888,9 @@ sequences each::
         .splitFastq( by: 10 )
         .subscribe { print it }
 
+
+.. warning:: By default chunks are kept in memory. When splitting big files specify the parameter ``file: true`` to save the
+  chunks into files in order to not incur in a ``OutOfMemoryException``. See the available parameter table below for details.
 
 
 A second version of the ``splitFastq`` operator allows you to split a FASTQ formatted content into record objects,
@@ -926,6 +993,7 @@ The combining operators are:
 
 * `cross`_
 * `collectFile`_
+* `combine`_
 * `concat`_
 * `into`_
 * `merge`_
@@ -934,6 +1002,7 @@ The combining operators are:
 * `spread`_
 * `tap`_
 
+.. _operator-into:
 
 into
 -------
@@ -1084,7 +1153,7 @@ For example::
 
         c1 = Channel.from( 1,2,3 )
         c2 = Channel.from( 'a','b' )
-        c3 = Channel.form( 'z' )
+        c3 = Channel.from( 'z' )
 
         c1 .mix(c2,c3)
            .subscribe onNext: { println it }, onComplete: { println 'Done' }
@@ -1112,6 +1181,7 @@ For example::
           3
 
 
+.. _operator-phase:
 
 phase
 --------
@@ -1168,6 +1238,7 @@ It prints::
     [null, 4]
 
 
+.. _operator-cross:
 
 cross
 -------
@@ -1261,12 +1332,13 @@ The following parameters can be used with the ``collectFile`` operator:
 =============== ========================
 Name            Description
 =============== ========================
-name            Name of the file where all received values are stored
-seed            A value or a map of values used to initialise the files content
-newLine         Appends a ``newline`` character automatically after each entry (default: ``false``)
-storeDir        Folder where the resulting file(s) are be stored
-tempDir         Folder where temporary files, used by the collecting process, are stored.
+name            Name of the file where all received values are stored.
+newLine         Appends a ``newline`` character automatically after each entry (default: ``false``).
+seed            A value or a map of values used to initialise the files content.
+skip            Skip the first `n` lines eg. ``skip: 1``.
 sort            Defines sorting criteria of content in resulting file(s). See below for sorting options.
+storeDir        Folder where the resulting file(s) are be stored.
+tempDir         Folder where temporary files, used by the collecting process, are stored.
 =============== ========================
 
 .. note:: The file content is sorted in such a way that it does not depend on the order on which
@@ -1321,6 +1393,53 @@ The following example shows how use a `closure` to collect and sort all sequence
  and it will require as much free space as are the data you are collecting. Optionally, an alternative temporary data
  folder can be specified by using the ``tempDir`` parameter.
 
+.. _operator-combine:
+
+combine
+-------
+
+The ``combine`` operator combines (cartesian product) the items emitted by two channels or by a channel and a ``Collection``
+object (as right operand). For example::
+
+    numbers = Channel.from(1,2,3)
+    words = Channel.from('hello', 'ciao')
+    numbers
+        .combine(words)
+        .println()
+
+    # outputs
+    [1, hello]
+    [2, hello]
+    [3, hello]
+    [1, ciao]
+    [2, ciao]
+    [3, ciao]
+
+A second version of the ``combine`` operator allows you to combine between them those items that share a common
+matching key. The index of the key element is specified by using the ``by`` parameter (the index is zero-based,
+multiple indexes can be specified with list a integers).
+For example::
+
+    left = Channel.from(['A',1], ['B',2], ['A',3])
+    right = Channel.from(['B','x'], ['B','y'], ['A','z'], ['A', 'w'])
+
+    left
+        .combine(right, by: 0)
+        .println()
+
+    # outputs
+    [A, 1, z]
+    [A, 3, z]
+    [A, 1, w]
+    [A, 3, w]
+    [B, 2, x]
+    [B, 2, y]
+
+
+See also `cross`_, `spread`_ and `phase`_.
+
+.. _operator-concat:
+
 concat
 --------
 
@@ -1349,9 +1468,12 @@ It will output::
     b
     c
 
+.. _operator-spread:
 
 spread
 ---------
+
+.. warning:: This operator is deprecated. See `combine`_ instead.
 
 The ``spread`` operator combines the items emitted by the source channel with all the values in an array
 or a ``Collection`` object specified as the operator argument. For example::
@@ -1498,7 +1620,9 @@ See also: `into`_, `choice`_ and `map`_ operators.
 
 
 route
-----------
+-----
+
+.. warning:: This operator is deprecated. It will be removed in a future release.
 
 The ``route`` operator allows you to forward the items emitted by the source channel 
 to a channel which is associated with the item's key. 
@@ -1548,6 +1672,7 @@ The maths operators are:
 * `min`_
 * `max`_
 * `sum`_
+* `toInteger`_
 
 
 count
@@ -1726,6 +1851,21 @@ a function that, given an item, returns the value to be summed. For example::
 ::
 
 	Square: 91
+
+
+
+toInteger
+---------
+
+The ``toInteger`` operator allows you to convert the string values emitted by a channel to ``Integer`` values. For
+example::
+
+    Channel
+        .from( '1', '7', '12' )
+        .toInteger()
+        .sum()
+        .println()
+
 
 
 Other operators

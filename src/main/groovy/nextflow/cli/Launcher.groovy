@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -35,7 +35,6 @@ import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
-import nextflow.ExitCode
 import nextflow.exception.AbortOperationException
 import nextflow.exception.AbortRunException
 import nextflow.exception.ConfigParseException
@@ -53,7 +52,7 @@ import org.eclipse.jgit.api.errors.GitAPIException
  */
 @Slf4j
 @CompileStatic
-class Launcher implements ExitCode {
+class Launcher {
 
     /**
      * Create the application command line parser
@@ -90,10 +89,14 @@ class Launcher implements ExitCode {
 
     protected void init() {
         allCommands = (List<CmdBase>)[
+                new CmdClean(),
                 new CmdClone(),
+                new CmdCloud(),
+                new CmdFs(),
                 new CmdHistory(),
                 new CmdInfo(),
                 new CmdList(),
+                new CmdLog(),
                 new CmdLs(),
                 new CmdPull(),
                 new CmdRun(),
@@ -142,7 +145,7 @@ class Launcher implements ExitCode {
         if( !options.logFile ) {
             if( isDaemon() )
                 options.logFile = '.node-nextflow.log'
-            else if( command instanceof CmdRun )
+            else if( command instanceof CmdRun || options.debug || options.trace )
                 options.logFile = ".nextflow.log"
         }
     }
@@ -225,6 +228,10 @@ class Launcher implements ExitCode {
                 normalized << '-'
             }
 
+            else if( current == '-with-singularity' && (i==args.size() || args[i].startsWith('-'))) {
+                normalized << '-'
+            }
+
             else if( current ==~ /^\-\-[a-zA-Z\d].*/ && !current.contains('=') ) {
                 current += '='
                 current += ( i<args.size() && isValue(args[i]) ? args[i++] : 'true' )
@@ -262,6 +269,10 @@ class Launcher implements ExitCode {
         if( !x ) return false                   // an empty string -> not a value
         if( x.size() == 1 ) return true         // a single char is not an option -> value true
         !x.startsWith('-') || x.isNumber()      // if not start with `-` or is a number -> value true
+    }
+
+    CmdBase findCommand( String cmdName ) {
+        allCommands.find { it.name == cmdName }
     }
 
     /**
@@ -346,20 +357,39 @@ class Launcher implements ExitCode {
             // note: use system.err.println since if an exception is raised
             //       parsing the cli params the logging is not configured
             System.err.println "${e.getMessage()} -- Check the available commands and options and syntax with 'help'"
-            System.exit( INVALID_COMMAND_LINE_PARAMETER )
+            System.exit(1)
 
         }
         catch( Throwable e ) {
             e.printStackTrace(System.err)
-            System.exit( UNKNOWN_ERROR )
+            System.exit(1)
         }
         return this
+    }
+
+    protected void checkForHelp() {
+        if( options.help || !command || command.help ) {
+            if( command instanceof UsageAware ) {
+                (command as UsageAware).usage()
+                // reset command to null to skip default execution
+                command = null
+                return
+            }
+
+            // replace the current command with the `help` command
+            def target = command?.name
+            command = allCommands.find { it instanceof CmdHelp }
+            if( target ) {
+                (command as CmdHelp).args = [target]
+            }
+        }
+
     }
 
     /**
      * Launch the pipeline execution
      */
-    protected void run() {
+    protected int run() {
 
         /*
          * setup environment
@@ -375,54 +405,54 @@ class Launcher implements ExitCode {
             // -- print out the version number, then exit
             if ( options.version ) {
                 println getVersion(fullVersion)
-                System.exit(OK)
+                return 0
             }
 
             // -- print out the program help, then exit
-            if( options.help || !command || command.help ) {
-                def target = command?.name
-                command = allCommands.find { it instanceof CmdHelp }
-                if( target )
-                    (command as CmdHelp).args = [target]
-            }
+            checkForHelp()
 
             // launch the command
-            command.run()
+            command?.run()
 
-            if( log.isTraceEnabled() ) {
-                log.trace "Exit\n" + dumpThreads()
-            }
+            log.trace "Exit\n" + dumpThreads()
+            return 0
         }
 
         catch( AbortRunException e ) {
-            System.exit(RUNTIME_ERROR)
+            return(1)
         }
 
         catch ( AbortOperationException e ) {
-            System.err.println e.getMessage() ?: e.toString()
+            def message = e.getMessage()
+            if( message ) System.err.println(message)
             log.debug ("Operation aborted", e.cause ?: e)
-            System.exit(COMMAND_ERROR)
+            return(1)
         }
 
         catch ( GitAPIException e ) {
             System.err.println e.getMessage() ?: e.toString()
             log.debug ("Operation aborted", e.cause ?: e)
-            System.exit(COMMAND_ERROR)
+            return(1)
         }
 
         catch( ConfigParseException e )  {
             log.error("${e.message}\n\n${e.cause?.message?.toString()?.indent('  ')}", e.cause ?: e)
-            System.exit(INVALID_CONFIG)
+            return(1)
         }
 
         catch( CompilationFailedException e ) {
             log.error e.message
-            System.exit(COMPILATION_ERROR)
+            return(1)
+        }
+
+        catch( IOException e ) {
+            log.error(e.message, e)
+            return(1)
         }
 
         catch( Throwable fail ) {
             log.error("@unknown", fail)
-            System.exit(UNKNOWN_ERROR)
+            return(1)
         }
 
     }
@@ -535,8 +565,10 @@ class Launcher implements ExitCode {
      */
     public static void main(String... args)  {
 
-        def launcher = DripMain.LAUNCHER ?: new Launcher()
-        launcher .command(args) .run()
+        final launcher = DripMain.LAUNCHER ?: new Launcher()
+        final status = launcher .command(args) .run()
+        if( status )
+            System.exit(status)
     }
 
 

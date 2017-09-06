@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -22,9 +22,12 @@ package nextflow.extension
 
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 
 import spock.lang.Specification
+import spock.lang.Unroll
+
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -62,6 +65,32 @@ class FilesExTest extends Specification {
 
     }
 
+    @Unroll
+    def 'validate simpleName: #path'() {
+
+        expect:
+        Paths.get(path).getSimpleName() == expected
+        new File(path).getSimpleName() == expected
+
+        where:
+        path                | expected
+        'filename.txt'      | 'filename'
+        'foo.bar.baz.gas'   | 'foo'
+        '/path/file.txt'    | 'file'
+        '/path/file_name'   | 'file_name'
+        '/path/'            | 'path'
+        '/path/file.txt.gz' | 'file'
+        'a'                 | 'a'
+        '.a'                | '.a'
+        '.log'              | '.log'
+        '.log.1.2'          | '.log'
+        '.'                 | '.'
+        '..'                | '.'
+        '/some/.'           | '.'
+        '/'                 | null
+
+
+    }
 
     def testGetName() {
 
@@ -1156,6 +1185,66 @@ class FilesExTest extends Specification {
         cleanup:
         folder.deleteDir()
         if( file ) Paths.get(file.name).delete()
+    }
+
+
+    def testExists() {
+
+        given:
+        def folder = Files.createTempDirectory('test')
+
+        when:
+        Path file_a = folder.resolve('a.txt'); file_a.text = 'Hello world'
+        then:
+        file_a.exists()
+        file_a.isFile()
+        !file_a.isLink()
+        Files.isRegularFile(file_a)
+
+        when:
+        Path file_b = file_a.mklink("$folder/b.txt")
+        then:
+        file_b.exists()
+        file_b.isLink()
+        Files.isRegularFile(file_b)
+
+        cleanup:
+        folder?.deleteDir()
+
+    }
+
+    def 'should delete a directory' () {
+
+        given:
+        def folder = Files.createTempDirectory('test')
+
+        def file_1 = folder.resolve('file_1')
+        def dir_1 = folder.resolve('dir_1')
+        def dir_2 = folder.resolve('dir_2')
+        def link_to_dir_2 = folder.resolve('link_to_dir_2')
+        def link_to_file_1 = folder.resolve('link_to_file_1')
+
+        Files.createFile(file_1)
+        Files.createDirectory(dir_1)
+        Files.createDirectory(dir_2)
+        Files.createSymbolicLink(link_to_file_1, file_1)
+        Files.createSymbolicLink(link_to_dir_2, dir_2)
+
+        expect:
+        !FilesEx.deleteDir(file_1)
+        Files.exists(file_1)
+
+        FilesEx.deleteDir(dir_2)
+        !Files.exists(dir_2)
+
+        !FilesEx.deleteDir(link_to_file_1)
+        Files.exists(link_to_file_1)
+
+        FilesEx.deleteDir(link_to_dir_2)
+        !Files.exists(link_to_dir_2)
+
+        cleanup:
+        folder?.deleteDir()
     }
 
 }

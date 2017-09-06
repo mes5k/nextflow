@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -50,6 +50,29 @@ class DataflowTapExtensionTest extends Specification {
         session.binding.first.val == 7
         session.binding.first.val == 9
         session.binding.first.val == Channel.STOP
+
+        result.val == 5
+        result.val == 8
+        result.val == 10
+        result.val == Channel.STOP
+
+        !session.dag.isEmpty()
+
+    }
+
+    def 'should `tap` item to more than one channel' () {
+
+        when:
+        def result = Channel.from( 4,7,9 ) .tap { foo; bar }.map { it+1 }
+        then:
+        session.binding.foo.val == 4
+        session.binding.foo.val == 7
+        session.binding.foo.val == 9
+        session.binding.foo.val == Channel.STOP
+        session.binding.bar.val == 4
+        session.binding.bar.val == 7
+        session.binding.bar.val == 9
+        session.binding.bar.val == Channel.STOP
 
         result.val == 5
         result.val == 8

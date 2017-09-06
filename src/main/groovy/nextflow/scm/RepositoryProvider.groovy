@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -28,8 +28,8 @@ import nextflow.exception.AbortOperationException
  *
  * Base class for a generic source repository provider
  *
- * Author Maria Chatzou
- * Author Paolo Di Tommaso
+ * @author Maria Chatzou
+ * @author Paolo Di Tommaso
  */
 @Slf4j
 @CompileStatic
@@ -46,7 +46,7 @@ abstract class RepositoryProvider {
     protected ProviderConfig config
 
     RepositoryProvider setCredentials(String userName, String password) {
-        config.user = user
+        config.user = userName
         config.password = password
         return this
     }
@@ -207,10 +207,10 @@ abstract class RepositoryProvider {
                 invokeAndParseResponse( getEndpointUrl() )
             }
             catch( IOException e2 ) {
-                throw new AbortOperationException("Cannot find `$project` -- Make sure exists a ${name.capitalize()} repository at this address `${getRepositoryUrl()}`")
+                throw new AbortOperationException("Cannot find `$project` -- Make sure exists a ${name.capitalize()} repository at this address `${getRepositoryUrl()}`", e2)
             }
 
-            throw new AbortOperationException("Not a valid Nextflow project -- The repository `${getRepositoryUrl()}` must contain a the script `${AssetManager.DEFAULT_MAIN_FILE_NAME}` or the file `${AssetManager.MANIFEST_FILE_NAME}`")
+            throw new AbortOperationException("Not a valid Nextflow project -- The repository `${getRepositoryUrl()}` must contain a the script `${AssetManager.DEFAULT_MAIN_FILE_NAME}` or the file `${AssetManager.MANIFEST_FILE_NAME}`", e1)
         }
 
     }

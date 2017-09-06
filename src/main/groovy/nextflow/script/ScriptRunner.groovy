@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -157,12 +157,12 @@ class ScriptRunner {
             // await termination
             terminate()
         }
-        catch (Exception e) {
+        catch (Throwable e) {
             session.abort(e)
             throw e
         }
 
-        if( session.aborted ) {
+        if( !session.success ) {
             throw new AbortRunException()
         }
 
@@ -245,12 +245,15 @@ class ScriptRunner {
     protected BaseScript parseScript( String scriptText, List<String> args = null) {
         log.debug "> Script parsing"
         session.binding.setArgs( new ArgsList(args) )
-        session.binding.setParams( session.config.params as Map )
+        session.binding.setParams( (Map)session.config.params )
         // TODO add test for this property
         session.binding.setVariable( 'baseDir', session.baseDir )
         session.binding.setVariable( 'workDir', session.workDir )
-        if( scriptFile )
-        session.binding.setVariable( 'workflow', new WorkflowMetadata(this) )
+        if( scriptFile ) {
+            def meta = new WorkflowMetadata(this)
+            session.binding.setVariable( 'workflow', meta )
+            session.binding.setVariable( 'nextflow', meta.nextflow )
+        }
 
         // generate an unique class name
         session.scriptClassName = generateClassName(scriptText)
@@ -327,15 +330,16 @@ class ScriptRunner {
         session.await()
         normalizeOutput()
         session.destroy()
+        log.debug "> Execution complete -- Goodbye"
     }
 
     /**
      * @param cli The launcher command line string
      */
-    void verifyAndTrackHistory(String cli) {
+    void verifyAndTrackHistory(String cli, String name) {
 
         // -- when resume, make sure the session id exists in the executions history
-        if( session.resumeMode && !HistoryFile.history.findUniqueId(session.uniqueId.toString())) {
+        if( session.resumeMode && !HistoryFile.DEFAULT.checkExistsById(session.uniqueId.toString())) {
             throw new AbortOperationException("Can't find a run with the specified id: ${session.uniqueId} -- Execution can't be resumed")
         }
 
@@ -343,8 +347,10 @@ class ScriptRunner {
             return
         def p = cli.indexOf('nextflow ')
         commandLine = p != -1 ? 'nextflow ' + cli.substring(p+9) : cli
-        HistoryFile.history.write( session.uniqueId, commandLine )
+        def revisionId = scriptFile.commitId ?: scriptFile.scriptId
+        HistoryFile.DEFAULT.write( name, session.uniqueId, revisionId, commandLine )
     }
+
 
     @PackageScope
     ScriptFile getScriptFile() { scriptFile }

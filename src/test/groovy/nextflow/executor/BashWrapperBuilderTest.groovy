@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -24,6 +24,8 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 import nextflow.Session
+import nextflow.container.ContainerConfig
+import nextflow.container.DockerBuilder
 import nextflow.processor.TaskBean
 import nextflow.processor.TaskProcessor
 import nextflow.processor.TaskRun
@@ -41,27 +43,27 @@ class BashWrapperBuilderTest extends Specification {
         def builder = new BashWrapperBuilder(new TaskBean())
 
         expect:
-        builder.changeToScratchDirectory() == null
+        builder.getScratchDirectoryCommand() == null
 
         when:
         builder.scratch = true
         then:
-        builder.changeToScratchDirectory() == 'NXF_SCRATCH="$(set +u; nxf_mktemp $TMPDIR)" && cd $NXF_SCRATCH'
+        builder.getScratchDirectoryCommand() == 'NXF_SCRATCH="$(set +u; nxf_mktemp $TMPDIR)"'
 
         when:
         builder.scratch = '$SOME_DIR'
         then:
-        builder.changeToScratchDirectory() == 'NXF_SCRATCH="$(set +u; nxf_mktemp $SOME_DIR)" && cd $NXF_SCRATCH'
+        builder.getScratchDirectoryCommand() == 'NXF_SCRATCH="$(set +u; nxf_mktemp $SOME_DIR)"'
 
         when:
         builder.scratch = '/my/temp'
         then:
-        builder.changeToScratchDirectory() == 'NXF_SCRATCH="$(set +u; nxf_mktemp /my/temp)" && cd $NXF_SCRATCH'
+        builder.getScratchDirectoryCommand() == 'NXF_SCRATCH="$(set +u; nxf_mktemp /my/temp)"'
 
         when:
         builder.scratch = 'ram-disk'
         then:
-        builder.changeToScratchDirectory() == 'NXF_SCRATCH="$(nxf_mktemp /dev/shm/)" && cd $NXF_SCRATCH'
+        builder.getScratchDirectoryCommand() == 'NXF_SCRATCH="$(nxf_mktemp /dev/shm/)"'
 
     }
 
@@ -132,7 +134,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 1
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -154,16 +156,19 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
                   exit \$exit_status
                 }
 
@@ -175,9 +180,11 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_exit EXIT
                 trap on_term TERM INT USR1 USR2
 
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
                 [ -f ${folder}/.command.env ] && source ${folder}/.command.env
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -236,7 +243,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 1
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -258,16 +265,19 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
                   exit \$exit_status
                 }
 
@@ -279,10 +289,12 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_exit EXIT
                 trap on_term TERM INT USR1 USR2
 
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
                 [ -f ${folder}/.command.env ] && source ${folder}/.command.env
-
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
+                        
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
                 CERR=\$PWD/.command.pe; mkfifo "\$CERR"
@@ -304,7 +316,21 @@ class BashWrapperBuilderTest extends Specification {
                 #!/bin/bash
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 3 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+
+                nxf_kill() {
+                    declare -a ALL_CHILD
+                    while read P PP;do
+                        ALL_CHILD[\$PP]+=" \$P"
+                    done < <(ps -e -o pid= -o ppid=)
+
+                    walk() {
+                        [[ \$1 != \$\$ ]] && kill \$1 2>/dev/null || true
+                        for i in \${ALL_CHILD[\$1]:=}; do walk \$i; done
+                    }
+
+                    walk \$1
+                }
 
                 nxf_tree() {
                     declare -a ALL_CHILD
@@ -313,7 +339,7 @@ class BashWrapperBuilderTest extends Specification {
                     done < <(ps -e -o pid= -o ppid=)
 
                     stat() {
-                        local x_ps=\$(ps -o pid=,state=,pcpu=,pmem=,vsz=,rss= \$1)
+                        local x_ps=\$(ps -o pid= -o state= -o pcpu= -o pmem= -o vsz= -o rss= \$1)
                         local x_io=\$(cat /proc/\$1/io 2> /dev/null | sed 's/^.*:\\s*//' | tr '\\n' ' ')
                         local x_vm=\$(cat /proc/\$1/status 2> /dev/null | egrep 'VmPeak|VmHWM' | sed 's/^.*:\\s*//' | sed 's/[\\sa-zA-Z]*\$//' | tr '\\n' ' ')
                         [[ ! \$x_ps ]] && return 0
@@ -337,25 +363,20 @@ class BashWrapperBuilderTest extends Specification {
                     local tot=''
                     if [[ "\$data" ]]; then
                       tot=\$(awk '{ t3+=(\$3*10); t4+=(\$4*10); t5+=\$5; t6+=\$6; t7+=\$7; t8+=\$8; t9+=\$9; t10+=\$10; t11+=\$11; t12+=\$12; t13+=\$13; t14+=\$14 } END { printf "%d 0 %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f\\n", NR,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12,t13,t14 }' <<< "\$data")
-                      printf "\$tot\\n"
+                      printf "\$tot\\n" || true
                     fi
                 }
 
                 nxf_sleep() {
                   if [[ \$1 < 0 ]]; then sleep 5;
-                  elif [[ \$1 < 10 ]]; then sleep 0.1;
+                  elif [[ \$1 < 10 ]]; then sleep 0.1 2>/dev/null || sleep 1;
                   elif [[ \$1 < 130 ]]; then sleep 1;
                   else sleep 5; fi
                 }
 
                 nxf_date() {
-                    case `uname` in
-                        Darwin) if hash gdate 2>/dev/null; then echo 'gdate +%s%3N'; else echo 'date +%s000'; fi;;
-                        *) echo 'date +%s%3N';;
-                    esac
+                    local ts=\$(date +%s%3N); [[ \$ts == *3N ]] && date +%s000 || echo \$ts
                 }
-
-                NXF_DATE=\$(nxf_date)
 
                 nxf_trace() {
                   local pid=\$1; local trg=\$2;
@@ -379,7 +400,7 @@ class BashWrapperBuilderTest extends Specification {
 
                 trap 'exit \${ret:=\$?}' EXIT
                 touch .command.trace
-                start_millis=\$(\$NXF_DATE)
+                start_millis=\$(nxf_date)
                 (
                 /bin/bash -ue ${folder}/.command.sh
                 ) &
@@ -387,8 +408,8 @@ class BashWrapperBuilderTest extends Specification {
                 nxf_trace "\$pid" .command.trace &
                 mon=\$!
                 wait \$pid || ret=\$?
-                end_millis=\$(\$NXF_DATE)
-                kill \$mon || wait \$mon
+                end_millis=\$(nxf_date)
+                nxf_kill \$mon || wait \$mon
                 echo \$((end_millis-start_millis)) >> .command.trace
                 """
                     .stripIndent().leftTrim()
@@ -436,7 +457,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 1
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -458,16 +479,20 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  rm -rf \$NXF_SCRATCH || true
                   exit \$exit_status
                 }
 
@@ -479,10 +504,11 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_exit EXIT
                 trap on_term TERM INT USR1 USR2
 
+                NXF_SCRATCH="\$(set +u; nxf_mktemp \$TMPDIR)"
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
                 [ -f ${folder}/.command.env ] && source ${folder}/.command.env
-                NXF_SCRATCH="\$(set +u; nxf_mktemp \$TMPDIR)" && cd \$NXF_SCRATCH
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -557,7 +583,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 2
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -579,16 +605,20 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  rm -rf \$NXF_SCRATCH || true
                   exit \$exit_status
                 }
 
@@ -600,11 +630,12 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_exit EXIT
                 trap on_term TERM INT USR1 USR2
 
+                NXF_SCRATCH="\$(set +u; nxf_mktemp \$TMPDIR)"
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
                 [ -f ${folder}/.command.env ] && source ${folder}/.command.env
-                NXF_SCRATCH="\$(set +u; nxf_mktemp \$TMPDIR)" && cd \$NXF_SCRATCH
-
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
+                
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
                 CERR=\$PWD/.command.pe; mkfifo "\$CERR"
@@ -629,7 +660,21 @@ class BashWrapperBuilderTest extends Specification {
             #!/bin/bash
             set -e
             set -u
-            NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 3 ]] && set -x
+            NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+
+            nxf_kill() {
+                declare -a ALL_CHILD
+                while read P PP;do
+                    ALL_CHILD[\$PP]+=" \$P"
+                done < <(ps -e -o pid= -o ppid=)
+
+                walk() {
+                    [[ \$1 != \$\$ ]] && kill \$1 2>/dev/null || true
+                    for i in \${ALL_CHILD[\$1]:=}; do walk \$i; done
+                }
+
+                walk \$1
+            }
 
             nxf_tree() {
                 declare -a ALL_CHILD
@@ -638,7 +683,7 @@ class BashWrapperBuilderTest extends Specification {
                 done < <(ps -e -o pid= -o ppid=)
 
                 stat() {
-                    local x_ps=\$(ps -o pid=,state=,pcpu=,pmem=,vsz=,rss= \$1)
+                    local x_ps=\$(ps -o pid= -o state= -o pcpu= -o pmem= -o vsz= -o rss= \$1)
                     local x_io=\$(cat /proc/\$1/io 2> /dev/null | sed 's/^.*:\\s*//' | tr '\\n' ' ')
                     local x_vm=\$(cat /proc/\$1/status 2> /dev/null | egrep 'VmPeak|VmHWM' | sed 's/^.*:\\s*//' | sed 's/[\\sa-zA-Z]*\$//' | tr '\\n' ' ')
                     [[ ! \$x_ps ]] && return 0
@@ -662,25 +707,20 @@ class BashWrapperBuilderTest extends Specification {
                 local tot=''
                 if [[ "\$data" ]]; then
                   tot=\$(awk '{ t3+=(\$3*10); t4+=(\$4*10); t5+=\$5; t6+=\$6; t7+=\$7; t8+=\$8; t9+=\$9; t10+=\$10; t11+=\$11; t12+=\$12; t13+=\$13; t14+=\$14 } END { printf "%d 0 %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f\\n", NR,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12,t13,t14 }' <<< "\$data")
-                  printf "\$tot\\n"
+                  printf "\$tot\\n" || true
                 fi
             }
 
             nxf_sleep() {
               if [[ \$1 < 0 ]]; then sleep 5;
-              elif [[ \$1 < 10 ]]; then sleep 0.1;
+              elif [[ \$1 < 10 ]]; then sleep 0.1 2>/dev/null || sleep 1;
               elif [[ \$1 < 130 ]]; then sleep 1;
               else sleep 5; fi
             }
 
             nxf_date() {
-                case `uname` in
-                    Darwin) if hash gdate 2>/dev/null; then echo 'gdate +%s%3N'; else echo 'date +%s000'; fi;;
-                    *) echo 'date +%s%3N';;
-                esac
+                local ts=\$(date +%s%3N); [[ \$ts == *3N ]] && date +%s000 || echo \$ts
             }
-
-            NXF_DATE=\$(nxf_date)
 
             nxf_trace() {
               local pid=\$1; local trg=\$2;
@@ -704,7 +744,7 @@ class BashWrapperBuilderTest extends Specification {
 
             trap 'exit \${ret:=\$?}' EXIT
             touch .command.trace
-            start_millis=\$(\$NXF_DATE)
+            start_millis=\$(nxf_date)
             (
             /bin/bash -ue ${folder}/.command.sh < ${folder}/.command.in
             ) &
@@ -712,8 +752,8 @@ class BashWrapperBuilderTest extends Specification {
             nxf_trace "\$pid" .command.trace &
             mon=\$!
             wait \$pid || ret=\$?
-            end_millis=\$(\$NXF_DATE)
-            kill \$mon || wait \$mon
+            end_millis=\$(nxf_date)
+            nxf_kill \$mon || wait \$mon
             echo \$((end_millis-start_millis)) >> .command.trace
             """
                     .stripIndent().leftTrim()
@@ -739,7 +779,7 @@ class BashWrapperBuilderTest extends Specification {
                 workDir: folder,
                 script: 'echo Hello world!',
                 containerImage: 'busybox',
-                dockerConfig: [sudo: true, enabled: true]
+                containerConfig: [engine: 'docker', sudo: true, enabled: true]
                 ] as TaskBean)
         bash.build()
 
@@ -761,7 +801,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 3
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -783,16 +823,20 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  sudo docker rm \$NXF_BOXID &>/dev/null || true
                   exit \$exit_status
                 }
 
@@ -805,8 +849,10 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_term TERM INT USR1 USR2
 
                 export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -821,7 +867,6 @@ class BashWrapperBuilderTest extends Specification {
                 pid=\$!
                 wait \$pid || ret=\$?
                 wait \$tee1 \$tee2
-                sudo docker rm \$NXF_BOXID &>/dev/null &
                 """
                         .stripIndent().leftTrim()
 
@@ -844,7 +889,7 @@ class BashWrapperBuilderTest extends Specification {
                 workDir: folder,
                 script: 'echo Hello world!',
                 containerImage: 'busybox',
-                dockerConfig: [temp: 'auto', enabled: true]
+                containerConfig: [engine: 'docker', temp: 'auto', enabled: true]
                 ] as TaskBean)
         bash.build()
 
@@ -866,7 +911,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 4
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -888,16 +933,20 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  docker rm \$NXF_BOXID &>/dev/null || true
                   exit \$exit_status
                 }
 
@@ -910,8 +959,10 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_term TERM INT USR1 USR2
 
                 export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -926,7 +977,6 @@ class BashWrapperBuilderTest extends Specification {
                 pid=\$!
                 wait \$pid || ret=\$?
                 wait \$tee1 \$tee2
-                docker rm \$NXF_BOXID &>/dev/null &
                 """
                         .stripIndent().leftTrim()
 
@@ -952,7 +1002,7 @@ class BashWrapperBuilderTest extends Specification {
                 workDir: folder,
                 script: 'echo Hello world!',
                 containerImage: 'ubuntu',
-                dockerConfig: [temp: 'auto', enabled: true, remove:false, kill: false]
+                containerConfig: [engine: 'docker', temp: 'auto', enabled: true, remove:false, kill: false]
                 ] as TaskBean)
         bash.build()
 
@@ -974,7 +1024,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 5
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -996,16 +1046,19 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
                   exit \$exit_status
                 }
 
@@ -1018,8 +1071,10 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_term TERM INT USR1 USR2
 
                 export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -1056,7 +1111,7 @@ class BashWrapperBuilderTest extends Specification {
                 workDir: folder,
                 script: 'echo Hello world!',
                 containerImage: 'ubuntu',
-                dockerConfig: [temp: 'auto', enabled: true, remove:false, kill: 'SIGXXX']
+                containerConfig: [engine: 'docker', temp: 'auto', enabled: true, remove:false, kill: 'SIGXXX']
                 ] as TaskBean)
         bash.build()
 
@@ -1078,7 +1133,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 6
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -1100,16 +1155,19 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
                   exit \$exit_status
                 }
 
@@ -1122,8 +1180,10 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_term TERM INT USR1 USR2
 
                 export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -1163,8 +1223,8 @@ class BashWrapperBuilderTest extends Specification {
                 workDir: folder,
                 script: 'echo Hello world!',
                 containerImage: 'busybox',
-                dockerMount: '/folder with blanks' as Path,
-                dockerConfig: [enabled: true]
+                containerMount: '/folder with blanks' as Path,
+                containerConfig: [engine: 'docker', enabled: true]
         ] as TaskBean)
         bash.build()
 
@@ -1186,7 +1246,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 7
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -1208,16 +1268,20 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  docker rm \$NXF_BOXID &>/dev/null || true
                   exit \$exit_status
                 }
 
@@ -1230,8 +1294,10 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_term TERM INT USR1 USR2
 
                 export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -1241,12 +1307,125 @@ class BashWrapperBuilderTest extends Specification {
                 tee .command.err < "\$CERR" >&2 &
                 tee2=\$!
                 (
-                docker run -i -v ${folder}:${folder} -v /folder\\ with\\ blanks:/folder\\ with\\ blanks -v "\$PWD":"\$PWD" -w "\$PWD" --entrypoint /bin/bash --name \$NXF_BOXID busybox -c "/bin/bash -ue ${folder}/.command.sh"
+                docker run -i -v /folder\\ with\\ blanks:/folder\\ with\\ blanks -v ${folder}:${folder} -v "\$PWD":"\$PWD" -w "\$PWD" --entrypoint /bin/bash --name \$NXF_BOXID busybox -c "/bin/bash -ue ${folder}/.command.sh"
                 ) >"\$COUT" 2>"\$CERR" &
                 pid=\$!
                 wait \$pid || ret=\$?
                 wait \$tee1 \$tee2
-                docker rm \$NXF_BOXID &>/dev/null &
+                """
+                        .stripIndent().leftTrim()
+
+
+        cleanup:
+        folder?.deleteDir()
+    }
+
+    def 'test bash wrapper with docker and scratch dir' () {
+
+        given:
+        def folder = Files.createTempDirectory('test')
+
+        /*
+         * bash run through docker
+         */
+        when:
+        def bash = new BashWrapperBuilder([
+                name: 'Hello 3',
+                workDir: folder,
+                scratch: true,
+                script: 'echo Hello world!',
+                containerImage: 'busybox',
+                containerConfig: [engine: 'docker', sudo: true, enabled: true]
+        ] as TaskBean)
+        bash.build()
+
+        then:
+        Files.exists(folder.resolve('.command.sh'))
+        Files.exists(folder.resolve('.command.run'))
+
+        folder.resolve('.command.sh').text ==
+                '''
+                #!/bin/bash -ue
+                echo Hello world!
+                '''
+                        .stripIndent().leftTrim()
+
+
+        folder.resolve('.command.run').text ==
+                """
+                #!/bin/bash
+                # NEXTFLOW TASK: Hello 3
+                set -e
+                set -u
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
+
+                nxf_env() {
+                    echo '============= task environment ============='
+                    env | sort | sed "s/\\(.*\\)AWS\\(.*\\)=\\(.\\{6\\}\\).*/\\1AWS\\2=\\3xxxxxxxxxxxxx/"
+                    echo '============= task output =================='
+                }
+
+                nxf_kill() {
+                    declare -a ALL_CHILD
+                    while read P PP;do
+                        ALL_CHILD[\$PP]+=" \$P"
+                    done < <(ps -e -o pid= -o ppid=)
+
+                    walk() {
+                        [[ \$1 != \$\$ ]] && kill \$1 2>/dev/null || true
+                        for i in \${ALL_CHILD[\$1]:=}; do walk \$i; done
+                    }
+
+                    walk \$1
+                }
+
+                nxf_mktemp() {
+                    local base=\${1:-/tmp}
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
+                }
+
+                on_exit() {
+                  exit_status=\${ret:=\$?}
+                  printf \$exit_status > ${folder}/.exitcode
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  (sudo -n true && sudo rm -rf "\$NXF_SCRATCH" || rm -rf "\$NXF_SCRATCH")&>/dev/null || true
+                  sudo docker rm \$NXF_BOXID &>/dev/null || true
+                  exit \$exit_status
+                }
+
+                on_term() {
+                    set +e
+                    sudo docker kill \$NXF_BOXID
+                }
+
+                trap on_exit EXIT
+                trap on_term TERM INT USR1 USR2
+
+                export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH="\$(set +u; nxf_mktemp \$TMPDIR)"
+                [[ \$NXF_DEBUG > 0 ]] && nxf_env
+                touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
+
+                set +e
+                COUT=\$PWD/.command.po; mkfifo "\$COUT"
+                CERR=\$PWD/.command.pe; mkfifo "\$CERR"
+                tee .command.out < "\$COUT" &
+                tee1=\$!
+                tee .command.err < "\$CERR" >&2 &
+                tee2=\$!
+                (
+                sudo docker run -i -v ${folder}:${folder} -v "\$PWD":"\$PWD" -w "\$PWD" --entrypoint /bin/bash --name \$NXF_BOXID busybox -c "/bin/bash -ue ${folder}/.command.sh"
+                ) >"\$COUT" 2>"\$CERR" &
+                pid=\$!
+                wait \$pid || ret=\$?
+                wait \$tee1 \$tee2
+                cp .command.out ${folder} || true
+                cp .command.err ${folder} || true
                 """
                         .stripIndent().leftTrim()
 
@@ -1268,22 +1447,19 @@ class BashWrapperBuilderTest extends Specification {
                 workDir: folder,
                 script: 'echo Hello world!',
                 containerImage: 'sl65',
-                dockerConfig: [enabled: true, fixOwnership: true]
+                containerConfig: [enabled: true, fixOwnership: true, engine: 'docker'] as ContainerConfig
                 ] as TaskBean)
         bash.systemOsName = 'Linux'
         bash.build()
 
         then:
 
-        folder.resolve('.command.sh').text ==
+        folder.resolve('.command.run.1').readLines()[-2..-1].join('\n') ==
                 """
-                #!/bin/bash -ue
-                echo Hello world!
-
                 # patch root ownership problem of files created with docker
                 [ \${NXF_OWNER:=''} ] && chown -fR --from root \$NXF_OWNER ${folder}/{*,.*} || true
                 """
-                        .stripIndent().leftTrim()
+                        .stripIndent().trim()
 
     }
 
@@ -1323,7 +1499,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -1345,16 +1521,20 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  docker rm \$NXF_BOXID &>/dev/null || true
                   exit \$exit_status
                 }
 
@@ -1367,8 +1547,10 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_term TERM INT USR1 USR2
 
                 export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -1383,7 +1565,6 @@ class BashWrapperBuilderTest extends Specification {
                 pid=\$!
                 wait \$pid || ret=\$?
                 wait \$tee1 \$tee2
-                docker rm \$NXF_BOXID &>/dev/null &
                 """
                         .stripIndent().leftTrim()
     }
@@ -1425,7 +1606,7 @@ class BashWrapperBuilderTest extends Specification {
         when:
         bash = new BashWrapperBuilder( new TaskBean() )
         then:
-        bash.scriptCleanUp( Paths.get("/my/exit/file's"), null ) ==
+        bash.scriptCleanUp( Paths.get("/my/exit/file's"), 'NXF_SCRATCH=xx', null ) ==
                     '''
                     nxf_env() {
                         echo '============= task environment ============='
@@ -1447,16 +1628,20 @@ class BashWrapperBuilderTest extends Specification {
                         walk $1
                     }
 
-                    function nxf_mktemp() {
+                    nxf_mktemp() {
                         local base=\${1:-/tmp}
-                        [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                        if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                        else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                        fi
                     }
 
                     on_exit() {
                       exit_status=${ret:=$?}
                       printf $exit_status > /my/exit/file\\'s
-                      rm -f "$COUT" || true
-                      rm -f "$CERR" || true
+                      set +u
+                      [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                      [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                      rm -rf $NXF_SCRATCH || true
                       exit $exit_status
                     }
 
@@ -1472,9 +1657,12 @@ class BashWrapperBuilderTest extends Specification {
 
 
         when:
+        def builder = Mock(DockerBuilder)
+        builder.getRemoveCommand() >> 'docker rm x'
+        builder.getKillCommand() >> 'docker kill x'
         bash = new BashWrapperBuilder(new TaskBean())
         then:
-        bash.scriptCleanUp( Paths.get('/my/exit/xxx'), 'docker stop x' ) ==
+        bash.scriptCleanUp( Paths.get('/my/exit/xxx'), null, builder ) ==
                 '''
                     nxf_env() {
                         echo '============= task environment ============='
@@ -1496,22 +1684,83 @@ class BashWrapperBuilderTest extends Specification {
                         walk $1
                     }
 
-                    function nxf_mktemp() {
+                    nxf_mktemp() {
                         local base=\${1:-/tmp}
-                        [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                        if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                        else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                        fi
                     }
 
                     on_exit() {
                       exit_status=${ret:=$?}
                       printf $exit_status > /my/exit/xxx
-                      rm -f "$COUT" || true
-                      rm -f "$CERR" || true
+                      set +u
+                      [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                      [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                      docker rm x &>/dev/null || true
                       exit $exit_status
                     }
 
                     on_term() {
                         set +e
-                        docker stop x
+                        docker kill x
+                    }
+
+                    trap on_exit EXIT
+                    trap on_term TERM INT USR1 USR2
+                    '''
+                        .stripIndent().leftTrim()
+
+
+        when:
+        builder = Mock(DockerBuilder)
+        builder.getRemoveCommand() >> 'docker rm x'
+        builder.getKillCommand() >> 'docker kill x'
+        bash = new BashWrapperBuilder(new TaskBean())
+        then:
+        bash.scriptCleanUp( Paths.get('/my/exit/xxx'), 'NXF_SCRATCH=xxx', builder ) ==
+                '''
+                    nxf_env() {
+                        echo '============= task environment ============='
+                        env | sort | sed "s/\\(.*\\)AWS\\(.*\\)=\\(.\\{6\\}\\).*/\\1AWS\\2=\\3xxxxxxxxxxxxx/"
+                        echo '============= task output =================='
+                    }
+
+                    nxf_kill() {
+                        declare -a ALL_CHILD
+                        while read P PP;do
+                            ALL_CHILD[$PP]+=" $P"
+                        done < <(ps -e -o pid= -o ppid=)
+
+                        walk() {
+                            [[ $1 != $$ ]] && kill $1 2>/dev/null || true
+                            for i in ${ALL_CHILD[$1]:=}; do walk $i; done
+                        }
+
+                        walk $1
+                    }
+
+                    nxf_mktemp() {
+                        local base=\${1:-/tmp}
+                        if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                        else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                        fi
+                    }
+
+                    on_exit() {
+                      exit_status=${ret:=$?}
+                      printf $exit_status > /my/exit/xxx
+                      set +u
+                      [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                      [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                      (sudo -n true && sudo rm -rf "$NXF_SCRATCH" || rm -rf "$NXF_SCRATCH")&>/dev/null || true
+                      docker rm x &>/dev/null || true
+                      exit $exit_status
+                    }
+
+                    on_term() {
+                        set +e
+                        docker kill x
                     }
 
                     trap on_exit EXIT
@@ -1545,11 +1794,12 @@ class BashWrapperBuilderTest extends Specification {
         folder.resolve('.command.env').text == '''
                     nxf_module_load(){
                       local mod=$1
-                      local ver=$2
-                      local new_module="$mod/$ver"
+                      local ver=${2:-}
+                      local new_module="$mod"; [[ $ver ]] && new_module+="/$ver"
+
                       if [[ ! $(module list 2>&1 | grep -o "$new_module") ]]; then
                         old_module=$(module list 2>&1 | grep -Eo "$mod\\/[^\\( \\n]+" || true)
-                        if [[ $old_module ]]; then
+                        if [[ $ver && $old_module ]]; then
                           module switch $old_module $new_module
                         else
                           module load $new_module
@@ -1566,17 +1816,18 @@ class BashWrapperBuilderTest extends Specification {
 
         when:
         folder = TestHelper.createInMemTempDir()
-        new BashWrapperBuilder([ workDir: folder, script: 'Hello world', moduleNames: ['ciao/1','mondo/2'] ] as TaskBean) .build()
+        new BashWrapperBuilder([ workDir: folder, script: 'Hello world', moduleNames: ['ciao/1','mondo/2', 'bioinfo-tools'] ] as TaskBean) .build()
 
         then:
         folder.resolve('.command.env').text == '''
                     nxf_module_load(){
                       local mod=$1
-                      local ver=$2
-                      local new_module="$mod/$ver"
+                      local ver=${2:-}
+                      local new_module="$mod"; [[ $ver ]] && new_module+="/$ver"
+
                       if [[ ! $(module list 2>&1 | grep -o "$new_module") ]]; then
                         old_module=$(module list 2>&1 | grep -Eo "$mod\\/[^\\( \\n]+" || true)
-                        if [[ $old_module ]]; then
+                        if [[ $ver && $old_module ]]; then
                           module switch $old_module $new_module
                         else
                           module load $new_module
@@ -1586,6 +1837,7 @@ class BashWrapperBuilderTest extends Specification {
 
                     nxf_module_load ciao 1
                     nxf_module_load mondo 2
+                    nxf_module_load bioinfo-tools
                     '''
                 .stripIndent().leftTrim()
 
@@ -1628,7 +1880,7 @@ class BashWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 9
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -1650,16 +1902,19 @@ class BashWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > ${folder}/.exitcode
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
                   exit \$exit_status
                 }
 
@@ -1671,11 +1926,13 @@ class BashWrapperBuilderTest extends Specification {
                 trap on_exit EXIT
                 trap on_term TERM INT USR1 USR2
 
+                NXF_SCRATCH=''
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 touch ${folder}/.command.begin
                 # user `beforeScript`
                 init this
                 [ -f ${folder}/.command.env ] && source ${folder}/.command.env
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"
@@ -1702,6 +1959,137 @@ class BashWrapperBuilderTest extends Specification {
 
     }
 
+    def 'test bash wrapper with shifter'() {
+
+        given:
+        def folder = Files.createTempDirectory('test')
+
+        /*
+         * bash run through docker
+         */
+        when:
+        def bash = new BashWrapperBuilder([
+                name: 'Hello 1',
+                workDir: folder,
+                script: 'echo Hello world!',
+                containerImage: 'docker:ubuntu:latest',
+                environment: [PATH: '/path/to/bin'],
+                containerConfig: [enabled: true, engine: 'shifter'] as ContainerConfig
+        ] as TaskBean)
+        bash.build()
+
+        then:
+        Files.exists(folder.resolve('.command.sh'))
+        Files.exists(folder.resolve('.command.run'))
+
+        folder.resolve('.command.sh').text ==
+                '''
+                #!/bin/bash -ue
+                echo Hello world!
+                '''
+                        .stripIndent().leftTrim()
+
+
+        folder.resolve('.command.run').text ==
+                """
+                #!/bin/bash
+                # NEXTFLOW TASK: Hello 1
+                set -e
+                set -u
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
+
+
+                function shifter_img() {
+                  local cmd=\$1
+                  local image=\$2
+                  shifterimg -v \$cmd \$image |  awk -F: '\$0~/status/{gsub("[\\", ]","",\$2);print \$2}'
+                }
+
+                function shifter_pull() {
+                  local image=\$1
+                  local STATUS=\$(shifter_img lookup \$image)
+                  if [[ \$STATUS != READY && \$STATUS != '' ]]; then
+                    STATUS=\$(shifter_img pull \$image)
+                    while [[ \$STATUS != READY && \$STATUS != FAILURE && \$STATUS != '' ]]; do
+                      sleep 5
+                      STATUS=\$(shifter_img pull \$image)
+                    done
+                  fi
+
+                  [[ \$STATUS == FAILURE || \$STATUS == '' ]] && echo "Shifter failed to pull image \\`\$image\\`" >&2  && exit 1
+                }
+
+                nxf_env() {
+                    echo '============= task environment ============='
+                    env | sort | sed "s/\\(.*\\)AWS\\(.*\\)=\\(.\\{6\\}\\).*/\\1AWS\\2=\\3xxxxxxxxxxxxx/"
+                    echo '============= task output =================='
+                }
+
+                nxf_kill() {
+                    declare -a ALL_CHILD
+                    while read P PP;do
+                        ALL_CHILD[\$PP]+=" \$P"
+                    done < <(ps -e -o pid= -o ppid=)
+
+                    walk() {
+                        [[ \$1 != \$\$ ]] && kill \$1 2>/dev/null || true
+                        for i in \${ALL_CHILD[\$1]:=}; do walk \$i; done
+                    }
+
+                    walk \$1
+                }
+
+                nxf_mktemp() {
+                    local base=\${1:-/tmp}
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
+                }
+
+                on_exit() {
+                  exit_status=\${ret:=\$?}
+                  printf \$exit_status > ${folder}/.exitcode
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  exit \$exit_status
+                }
+
+                on_term() {
+                    set +e
+                    [[ "\$pid" ]] && nxf_kill \$pid
+                }
+
+                trap on_exit EXIT
+                trap on_term TERM INT USR1 USR2
+
+                export NXF_BOXID="nxf-\$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"
+                NXF_SCRATCH=''
+                [[ \$NXF_DEBUG > 0 ]] && nxf_env
+                touch ${folder}/.command.begin
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
+
+                set +e
+                COUT=\$PWD/.command.po; mkfifo "\$COUT"
+                CERR=\$PWD/.command.pe; mkfifo "\$CERR"
+                tee .command.out < "\$COUT" &
+                tee1=\$!
+                tee .command.err < "\$CERR" >&2 &
+                tee2=\$!
+                (
+                shifter_pull docker:ubuntu:latest
+                NXF_DEBUG=\${NXF_DEBUG:=0} BASH_ENV=\"${folder}/.command.env\" shifter --image docker:ubuntu:latest /bin/bash -c "/bin/bash -ue ${folder}/.command.sh"
+                ) >"\$COUT" 2>"\$CERR" &
+                pid=\$!
+                wait \$pid || ret=\$?
+                wait \$tee1 \$tee2
+                """
+                        .stripIndent().leftTrim()
+
+
+        cleanup:
+        folder?.deleteDir()
+    }
 
 
 }

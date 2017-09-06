@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -73,8 +73,8 @@ class PhaseOp {
         final stopCount = new AtomicInteger(count)
         final remainder = opts.remainder ? opts.remainder as boolean : false
 
-        DataflowExtensions.subscribeImpl( source, phaseHandler(state, count, 0, result, mapper, stopCount, remainder) )
-        DataflowExtensions.subscribeImpl( target, phaseHandler(state, count, 1, result, mapper, stopCount, remainder) )
+        DataflowHelper.subscribeImpl( source, phaseHandler(state, count, 0, result, mapper, stopCount, remainder) )
+        DataflowHelper.subscribeImpl( target, phaseHandler(state, count, 1, result, mapper, stopCount, remainder) )
         return result
     }
 

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -24,8 +24,10 @@ import static nextflow.processor.TaskStatus.RUNNING
 import static nextflow.processor.TaskStatus.SUBMITTED
 
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 
 import groovy.util.logging.Slf4j
+import nextflow.exception.ProcessException
 import nextflow.exception.ProcessFailedException
 import nextflow.exception.ProcessSubmitException
 import nextflow.file.FileHelper
@@ -34,6 +36,8 @@ import nextflow.processor.TaskRun
 import nextflow.trace.TraceRecord
 import nextflow.util.CmdLineHelper
 import nextflow.util.Duration
+import nextflow.util.Throttle
+
 /**
  * Handles a job execution in the underlying grid platform
  */
@@ -65,9 +69,14 @@ class GridTaskHandler extends TaskHandler {
 
     private long exitStatusReadTimeoutMillis
 
+    private Duration sanityCheckInterval
+
     final static private READ_TIMEOUT = Duration.of('270sec') // 4.5 minutes
 
     BatchCleanup batch
+
+    /** only for testing purpose */
+    protected GridTaskHandler() {}
 
     GridTaskHandler( TaskRun task, AbstractGridExecutor executor ) {
         super(task)
@@ -78,9 +87,10 @@ class GridTaskHandler extends TaskHandler {
         this.outputFile = task.workDir.resolve(TaskRun.CMD_OUTFILE)
         this.errorFile = task.workDir.resolve(TaskRun.CMD_ERRFILE)
         this.wrapperFile = task.workDir.resolve(TaskRun.CMD_RUN)
-        final timeout = executor.session?.getExitReadTimeout(executor.name, READ_TIMEOUT) ?: READ_TIMEOUT
-        this.exitStatusReadTimeoutMillis = timeout.toMillis()
+        final duration = executor.session?.getExitReadTimeout(executor.name, READ_TIMEOUT) ?: READ_TIMEOUT
+        this.exitStatusReadTimeoutMillis = duration.toMillis()
         this.queue = task.config?.queue
+        this.sanityCheckInterval = duration
     }
 
     protected ProcessBuilder createProcessBuilder() {
@@ -105,17 +115,15 @@ class GridTaskHandler extends TaskHandler {
      */
     @Override
     void submit() {
-        log.debug "Launching process > ${task.name} -- work folder: ${task.workDir}"
-        // -- create the wrapper script
-        executor.createBashWrapperBuilder(task).build()
-
-        // -- start the execution and notify the event to the monitor
-        final builder = createProcessBuilder()
-
-        def exitStatus = 0
         String result = null
-
+        def exitStatus = Integer.MAX_VALUE
+        ProcessBuilder builder = null
         try {
+            // -- create the wrapper script
+            executor.createBashWrapperBuilder(task).build()
+
+            // -- start the execution and notify the event to the monitor
+            builder = createProcessBuilder()
             final process = builder.start()
 
             try {
@@ -128,15 +136,16 @@ class GridTaskHandler extends TaskHandler {
                 // -- wait the the process completes
                 result = process.text
                 exitStatus = process.waitFor()
-                log.trace "submit ${task.name} > exit: $exitStatus\n$result\n"
 
                 if( exitStatus ) {
-                    throw new ProcessSubmitException("Failed to submit job to grid scheduler for execution")
+                    log.debug "Failed to submit process ${task.name} > exit: $exitStatus; workDir: $task.workDir\n$result\n"
+                    throw new ProcessSubmitException("Failed to submit process to grid scheduler for execution")
                 }
 
                 // save the JobId in the
                 this.jobId = executor.parseJobId(result)
                 this.status = SUBMITTED
+                log.debug "[${executor.name.toUpperCase()}] submitted process ${task.name} > jobId: $jobId; workDir: ${task.workDir}"
             }
             finally {
                 // make sure to release all resources
@@ -149,7 +158,7 @@ class GridTaskHandler extends TaskHandler {
         }
         catch( Exception e ) {
             task.exitStatus = exitStatus
-            task.script = CmdLineHelper.toLine(builder.command())
+            task.script = builder ? CmdLineHelper.toLine(builder.command()) : null
             task.stdout = result
             status = COMPLETED
             throw new ProcessFailedException("Error submitting process '${task.name}' for execution", e )
@@ -159,6 +168,8 @@ class GridTaskHandler extends TaskHandler {
 
 
     private long startedMillis
+
+    private long exitTimestampMillis0 = System.currentTimeMillis()
 
     private long exitTimestampMillis1
 
@@ -174,14 +185,26 @@ class GridTaskHandler extends TaskHandler {
 
         String workDirList = null
         if( exitTimestampMillis1 && FileHelper.workDirIsNFS ) {
-            workDirList = listDirectory(task.workDir)
+            /*
+             * When the file is in a NFS folder in order to avoid false negative
+             * list the content of the parent path to force refresh of NFS metadata
+             * http://stackoverflow.com/questions/3833127/alternative-to-file-exists-in-java
+             * http://superuser.com/questions/422061/how-to-determine-whether-a-directory-is-on-an-nfs-mounted-drive
+             */
+            workDirList = FileHelper.listDirectory(task.workDir)
         }
 
         /*
          * when the file does not exist return null, to force the monitor to continue to wait
          */
-        def exitAttrs
-        if( !exitFile || !(exitAttrs=exitFile.readAttributes()) || !exitAttrs.lastModifiedTime()?.toMillis() ) {
+        def exitAttrs = null
+        if( !exitFile || !(exitAttrs=FileHelper.readAttributes(exitFile)) || !exitAttrs.lastModifiedTime()?.toMillis() ) {
+            if( log.isTraceEnabled() ) {
+                if( !exitFile )
+                    log.trace "JobId `$jobId` exit file is null"
+                else
+                    log.trace "JobId `$jobId` exit file: $exitFile - lastModified: ${exitAttrs?.lastModifiedTime()} - size: ${exitAttrs?.size()}"
+            }
             // -- fetch the job status before return a result
             final active = executor.checkActiveStatus(jobId, queue)
 
@@ -199,7 +222,7 @@ class GridTaskHandler extends TaskHandler {
             // -- if the job is not active, something is going wrong
             //  * before returning an error code make (due to NFS latency) the file status could be in a incoherent state
             if( !exitTimestampMillis1 ) {
-                log.debug "Exit file does not exist and the job is not running for task: $this -- Try to wait before kill it"
+                log.trace "Exit file does not exist for and the job is not running for task: $this -- Try to wait before kill it"
                 exitTimestampMillis1 = System.currentTimeMillis()
             }
 
@@ -265,16 +288,32 @@ class GridTaskHandler extends TaskHandler {
     boolean checkIfRunning() {
 
         if( isSubmitted() ) {
-
-            def startAttr
-            if( startFile && (startAttr=startFile.readAttributes()) && startAttr.lastModifiedTime()?.toMillis() > 0) {
+            if( isStarted() ) {
                 status = RUNNING
                 // use local timestamp because files are created on remote nodes which
                 // may not have a synchronized clock
                 startedMillis = System.currentTimeMillis()
                 return true
             }
+        }
 
+        return false
+    }
+
+    private boolean isStarted() {
+
+        BasicFileAttributes attr
+        if( startFile && (attr=FileHelper.readAttributes(startFile)) && attr.lastModifiedTime()?.toMillis() > 0  )
+            return true
+
+        // to avoid unnecessary pressure on the file system check the existence of
+        // the exit file on only on a time-periodic basis
+        def now = System.currentTimeMillis()
+        if( now - exitTimestampMillis0 > exitStatusReadTimeoutMillis ) {
+            exitTimestampMillis0 = now
+            // fix issue #268
+            if( exitFile && (attr=FileHelper.readAttributes(exitFile)) && attr.lastModifiedTime()?.toMillis() > 0  )
+                return true
         }
 
         return false
@@ -286,17 +325,39 @@ class GridTaskHandler extends TaskHandler {
         // verify the exit file exists
         def exit
         if( isRunning() && (exit = readExitStatus()) != null ) {
-
             // finalize the task
             task.exitStatus = exit
             task.stdout = outputFile
             task.stderr = errorFile
             status = COMPLETED
             return true
-
+        }
+        // sanity check
+        else if( !passSanityCheck() ) {
+            log.debug "Task sanity check failed > $task"
+            task.stdout = outputFile
+            task.stderr = errorFile
+            status = COMPLETED
+            return true
         }
 
         return false
+    }
+
+    protected boolean passSanityCheck() {
+        Throttle.after(sanityCheckInterval, true) {
+            if( isCompleted() ) {
+                return true
+            }
+            if( task.workDir.exists() ) {
+                return true
+            }
+            // if the task is not complete (ie submitted or running)
+            // AND the work-dir does not exists ==> something is wrong
+            task.error = new ProcessException("Task work directory is missing (!)")
+            // sanity check does not pass
+            return false
+        }
     }
 
     @Override
@@ -313,7 +374,7 @@ class GridTaskHandler extends TaskHandler {
         builder << "jobId: $jobId; "
 
         super.toStringBuilder(builder)
-        final exitAttrs = exitFile.readAttributes()
+        final exitAttrs = FileHelper.readAttributes(exitFile)
 
         builder << " started: " << (startedMillis ? startedMillis : '-') << ';'
         builder << " exited: " << (exitAttrs ? exitAttrs.lastModifiedTime() : '-') << '; '
@@ -332,33 +393,5 @@ class GridTaskHandler extends TaskHandler {
     }
 
 
-    /*
-     * When the file is in a NFS folder in order to avoid false negative
-     * list the content of the parent path to force refresh of NFS metadata
-     * http://stackoverflow.com/questions/3833127/alternative-to-file-exists-in-java
-     * http://superuser.com/questions/422061/how-to-determine-whether-a-directory-is-on-an-nfs-mounted-drive
-     */
-    private String listDirectory(Path path) {
 
-        String result = null
-        Process process = null
-        try {
-            process = Runtime.runtime.exec("ls -la ${path}")
-            def listStatus = process.waitFor()
-            if( listStatus>0 ) {
-                log.debug "Can't list folder: ${path} -- Exit status: $listStatus"
-            }
-            else {
-                result = process.text
-            }
-        }
-        catch( IOException e ) {
-            log.debug "Can't list folder: $path -- Cause: ${e.message ?: e.toString()}"
-        }
-        finally {
-            process?.destroy()
-        }
-
-        return result
-    }
 }

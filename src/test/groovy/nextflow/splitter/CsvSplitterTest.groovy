@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -171,6 +171,24 @@ class CsvSplitterTest extends Specification {
         items.size() == 2
         items[0] == [ [x:'alpha',y:'beta',z:'delta'], [x:'gamma',y:'',z:'zeta'], [x:'eta',y:'theta',z:'iota'] ]
         items[1] == [ [x:'mu',y:'nu',z:'xi'], [x:'pi', y:'rho', z:'sigma'] ]
+
+    }
+
+    def testIllegalRecordMode() {
+
+        when:
+        new CsvSplitter().options(record:true)
+        then:
+        thrown(IllegalArgumentException)
+
+    }
+
+    def testIllegalFileMode() {
+
+        when:
+        new CsvSplitter().options(file:true)
+        then:
+        thrown(IllegalArgumentException)
 
     }
 

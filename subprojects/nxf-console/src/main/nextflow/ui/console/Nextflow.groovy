@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -34,6 +34,7 @@ import nextflow.Session
 import nextflow.ast.NextflowDSL
 import nextflow.cli.CliOptions
 import nextflow.cli.CmdInfo
+import nextflow.cli.CmdRun
 import nextflow.script.BaseScript
 import nextflow.config.ConfigBuilder
 import nextflow.script.ScriptBinding
@@ -89,8 +90,8 @@ class Nextflow extends Console {
         def config = new ConfigBuilder()
                         .setOptions( new CliOptions() )
                         .setBaseDir(Paths.get('.'))
+                        .setCmdRun( new CmdRun() )
                         .build()
-                        .toMap()
 
         return new ScriptBinding(config)
     }
@@ -229,7 +230,7 @@ class Nextflow extends Console {
         new LoggerHelper(opts).setup()
 
         if (args.length == 2 && args[1] == '--help') {
-            println 'usage: nextflow repl [filename]'
+            println 'usage: nextflow console [filename]'
             return
         }
 

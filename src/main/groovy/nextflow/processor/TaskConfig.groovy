@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,7 +19,7 @@
  */
 
 package nextflow.processor
-import static nextflow.processor.TaskProcessor.TASK_CONFIG
+import static nextflow.processor.TaskProcessor.TASK_CONTEXT_PROPERTY_NAME
 
 import java.nio.file.Path
 
@@ -78,7 +78,7 @@ class TaskConfig extends LazyMap implements Cloneable {
             (target.ext as LazyMap).binding = context
 
         // set the this object in the task context in order to allow task properties to be resolved in process script
-        context.put(TASK_CONFIG, this)
+        context.put(TASK_CONTEXT_PROPERTY_NAME, this)
 
         return this
     }
@@ -166,7 +166,7 @@ class TaskConfig extends LazyMap implements Cloneable {
             return (ErrorStrategy)strategy
 
         if( strategy == null )
-            return null
+            return ErrorStrategy.TERMINATE
 
         throw new IllegalArgumentException("Not a valid `ErrorStrategy` value: ${strategy}")
     }

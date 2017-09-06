@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -31,7 +31,7 @@ import nextflow.trace.TraceRecord
  * Actions to handle the underlying job running the user task.
  *
  * <p>
- * Note this model the job in the execution facility (i.e. grid, cloud, etc)
+ * Note this types the job in the execution facility (i.e. grid, cloud, etc)
  * NOT the *logical* user task
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -123,7 +123,7 @@ public abstract class TaskHandler {
     boolean isCompleted()  { return status == COMPLETED  }
 
     protected StringBuilder toStringBuilder(StringBuilder builder) {
-        builder << "id: ${task.id}; name: ${task.name}; status: $status; exit: ${task.exitStatus != Integer.MAX_VALUE ? task.exitStatus : '-'}; workDir: ${task.workDir}"
+        builder << "id: ${task.id}; name: ${task.name}; status: $status; exit: ${task.exitStatus != Integer.MAX_VALUE ? task.exitStatus : '-'}; error: ${task.error ?: '-'}; workDir: ${task.workDir}"
     }
 
     String toString() {
@@ -155,6 +155,10 @@ public abstract class TaskHandler {
         record.container = task.container
         record.attempt = task.config.attempt
 
+        record.script = task.getScript()
+        record.scratch = task.getScratch()
+        record.workdir = task.getWorkDirStr()
+
         if( isCompleted() ) {
             if( completeTimeMillis ) {
                 // completion timestamp
@@ -166,14 +170,13 @@ public abstract class TaskHandler {
                 // note: this may be override run time provided by the trace file (3rd line)
                 if( startTimeMillis ) {
                     record.realtime = completeTimeMillis - startTimeMillis
-                    if(log.isTraceEnabled())
                     log.trace "task stats: ${task.name}; start: ${startTimeMillis}; complete: ${completeTimeMillis}; realtime: ${completeTimeMillis - startTimeMillis} [${record.realtime}]; "
                 }
             }
 
             def file = task.workDir?.resolve(TaskRun.CMD_TRACE)
             try {
-                if(file) record.parseTraceFile(file.text)
+                if(file) record.parseTraceFile(file)
             }
             catch( NoSuchFileException e ) {
                 // ignore it

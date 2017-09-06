@@ -19,14 +19,17 @@ Contents:
    operator
    executor
    config
+   awscloud
    amazons3
-   docker
    dnanexus
+   docker
+   singularity
    ignite
    tracing
    sharing
    metadata
    example
+   faq
 
 
 

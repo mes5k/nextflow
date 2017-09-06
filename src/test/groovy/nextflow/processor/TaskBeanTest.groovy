@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -23,6 +23,7 @@ package nextflow.processor
 import java.nio.file.Paths
 
 import nextflow.Session
+import nextflow.container.ContainerConfig
 import nextflow.util.MemoryUnit
 import spock.lang.Specification
 /**
@@ -41,7 +42,7 @@ class TaskBeanTest extends Specification {
         session.getBinDir() >> Paths.get('/bin/dir')
 
         def process = Mock(TaskProcessor)
-        process.getConfig() >> ([unstageStrategy: 'rsync'] as ProcessConfig)
+        process.getConfig() >> ([stageInMode: 'link', stageOutMode: 'rsync'] as ProcessConfig)
         process.getProcessEnvironment() >> [alpha: 'one', beta: 'two']
         process.getSession() >> session
 
@@ -68,7 +69,7 @@ class TaskBeanTest extends Specification {
         task.getTargetDir() >> Paths.get('/target/work/dir')
         task.getInputEnvironment() >> [beta: 'xxx', gamma: 'yyy']
         task.getContainer() >> 'busybox:latest'
-        task.getDockerConfig() >> [docker: true, registry: 'x']
+        task.getContainerConfig() >> [docker: true, registry: 'x']
         task.isContainerExecutable() >> true
 
         when:
@@ -89,8 +90,8 @@ class TaskBeanTest extends Specification {
         bean.afterScript == 'after do that'
 
         bean.containerImage == 'busybox:latest'
-        bean.dockerConfig == [docker: true, registry: 'x']
-        bean.dockerMemory == new MemoryUnit('1GB')
+        bean.containerConfig == [docker: true, registry: 'x'] as ContainerConfig
+        bean.containerMemory == new MemoryUnit('1GB')
         bean.executable
         bean.statsEnabled
 
@@ -98,7 +99,8 @@ class TaskBeanTest extends Specification {
         bean.outputFiles ==  [ 'simple.txt', 'my/path/file.bam' ]
         bean.workDir == Paths.get('/work/dir')
         bean.binDir == Paths.get('/bin/dir')
-        bean.unstageStrategy == 'rsync'
+        bean.stageInMode == 'link'
+        bean.stageOutMode == 'rsync'
 
     }
 
@@ -110,7 +112,7 @@ class TaskBeanTest extends Specification {
                 environment: [A: 'Alpha', B: 'Beta'],
                 moduleNames: ['x','y'],
                 workDir: Paths.get('/a/b'),
-                dockerMemory: new MemoryUnit('2GB')
+                containerMemory: new MemoryUnit('2GB')
         )
 
         when:
@@ -121,6 +123,6 @@ class TaskBeanTest extends Specification {
         copy.environment == task.environment
         copy.moduleNames == task.moduleNames
         copy.workDir == task.workDir
-        copy.dockerMemory == task.dockerMemory
+        copy.containerMemory == task.containerMemory
     }
 }

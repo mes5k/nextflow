@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -114,6 +114,7 @@ class CsvSplitter extends AbstractTextSplitter {
      */
     protected Map<String,?> validOptions() {
         def result = super.validOptions()
+        result.remove('file')   // <-- `file` mode not support by CsvSplitter
         result.sep = String
         result.strip = Boolean
         result.header = [ Boolean, List ]

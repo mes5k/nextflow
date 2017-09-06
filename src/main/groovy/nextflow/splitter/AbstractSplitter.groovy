@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -296,12 +296,11 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
      * @return A map representing the valid options for the splitter. The map keys define the
      * accepted parameter names, the values the valid values for each of them.
      */
-    protected Map<String,?> validOptions() {
+    protected Map<String,Object> validOptions() {
         [
                 each: Closure,
                 by: Integer,
                 into: [ Collection, DataflowQueue ],
-                record: [ Boolean, Map ],
                 autoClose: Boolean,
                 limit: Integer,
                 elem: Integer,
@@ -406,8 +405,7 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
     private int debugCount = 0
 
     protected void append( into, value ) {
-        if( log.isTraceEnabled() )
-            log.trace "Splitter value: ${debugCount++}"
+        log.trace "Splitter value: ${debugCount++}"
 
         if( into instanceof Collection )
             into.add(value)

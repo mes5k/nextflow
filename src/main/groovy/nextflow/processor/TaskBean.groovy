@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -24,6 +24,7 @@ import java.nio.file.Path
 
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
+import nextflow.container.ContainerConfig
 import nextflow.executor.BashWrapperBuilder
 import nextflow.util.MemoryUnit
 
@@ -60,15 +61,13 @@ class TaskBean implements Serializable, Cloneable {
 
     List<String> shell
 
-    Map dockerConfig
+    ContainerConfig containerConfig
 
-    Map shifterConfig
+    String containerCpuset
 
-    String dockerCpuset
+    MemoryUnit containerMemory
 
-    MemoryUnit dockerMemory
-
-    Path dockerMount
+    Path containerMount
 
     boolean statsEnabled
 
@@ -82,11 +81,15 @@ class TaskBean implements Serializable, Cloneable {
 
     List<String> outputFiles
 
-    String unstageStrategy
+    String stageInMode
+
+    String stageOutMode
 
     Path sharedDir
 
     Path binDir
+
+    def cleanup
 
     @PackageScope
     TaskBean() {
@@ -116,13 +119,13 @@ class TaskBean implements Serializable, Cloneable {
         this.script = task.getScript()
         this.beforeScript = task.config.beforeScript
         this.afterScript = task.config.afterScript
+        this.cleanup = task.config.cleanup
 
         // container config
         this.containerImage = task.getContainer()
-        this.dockerConfig = task.getDockerConfig()
-        this.dockerMemory = task.config.getMemory()
+        this.containerConfig = task.getContainerConfig()
+        this.containerMemory = task.config.getMemory()
         this.executable = task.isContainerExecutable()
-        this.shifterConfig = task.getShifterConfig()
 
         // stats
         this.statsEnabled = task.getProcessor().getSession().statsEnabled
@@ -131,7 +134,8 @@ class TaskBean implements Serializable, Cloneable {
         this.outputFiles = task.getOutputFilesNames()
         this.sharedDir = task.getProcessor().getSession().getWorkDir()
         this.binDir = task.getProcessor().getSession().getBinDir()
-        this.unstageStrategy = task.getProcessor().getConfig().unstageStrategy
+        this.stageInMode = task.getProcessor().getConfig().stageInMode
+        this.stageOutMode = task.getProcessor().getConfig().stageOutMode
 
     }
 

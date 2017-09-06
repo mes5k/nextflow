@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -29,6 +29,8 @@ import groovy.util.logging.Slf4j
 import nextflow.Const
 import nextflow.config.ConfigBuilder
 import nextflow.util.Duration
+import nextflow.util.VersionNumber
+
 /**
  * Models workflow metadata properties and notification handler
  *
@@ -38,6 +40,26 @@ import nextflow.util.Duration
 @CompileStatic
 @ToString(includeNames = true)
 class WorkflowMetadata {
+
+    /**
+     * Run name
+     */
+    String runName
+
+    /**
+     * The script unique hash key
+     */
+    String scriptId
+
+    /**
+     * The main script file path
+     */
+    Path scriptFile
+
+    /**
+     * The main script name
+     */
+    String scriptName
 
     /**
      * Project repository Git remote URL
@@ -141,7 +163,9 @@ class WorkflowMetadata {
 
     final private ScriptRunner owner
 
-    final private List<Closure> events = []
+    final private List<Closure> onCompleteActions = []
+
+    final private List<Closure> onErrorActions = []
 
     /**
      * Initialise the available workflow properties
@@ -150,6 +174,9 @@ class WorkflowMetadata {
      */
     WorkflowMetadata( ScriptRunner owner ) {
         this.owner = owner
+        this.scriptId = owner.scriptFile.scriptId
+        this.scriptFile = owner.scriptFile.main
+        this.scriptName = owner.scriptFile.main?.fileName
         this.repository = owner.scriptFile.repository
         this.commitId = owner.scriptFile.commitId
         this.revision = owner.scriptFile.revision
@@ -157,22 +184,24 @@ class WorkflowMetadata {
         this.start = new Date()
         this.container = owner.fetchContainers()
         this.commandLine = owner.commandLine
-        this.nextflow = [version: Const.APP_VER, build: Const.APP_BUILDNUM, timestamp: Const.APP_TIMESTAMP_UTC]
+        this.nextflow = [version: new VersionNumber(Const.APP_VER), build: Const.APP_BUILDNUM, timestamp: Const.APP_TIMESTAMP_UTC]
         this.workDir = owner.session.workDir
         this.launchDir = Paths.get('.').complete()
         this.profile = owner.profile ?: ConfigBuilder.DEFAULT_PROFILE
         this.sessionId = owner.session.uniqueId
         this.resume = owner.session.resumeMode
+        this.runName = owner.session.runName
 
         // check if there's a onComplete action in the config file
         registerConfigAction(owner.session.config.workflow as Map)
         owner.session.onShutdown { invokeOnComplete() }
+        owner.session.onError( this.&invokeOnError )
     }
 
     /**
      * Implements the following idiom in the pipeline script:
      * <pre>
-     *     window.onComplete {
+     *     workflow.onComplete {
      *         // do something
      *     }
      * </pre>
@@ -183,15 +212,15 @@ class WorkflowMetadata {
 
         final clone = (Closure)action.clone()
         clone.delegate = owner.session.binding.variables
-        clone.resolveStrategy = Closure.DELEGATE_ONLY
+        clone.resolveStrategy = Closure.DELEGATE_FIRST
 
-        events.add(clone)
+        onCompleteActions.add(clone)
     }
 
     /**
      * Implements the following idiom in the pipeline script:
      * <pre>
-     *     window.onComplete = {
+     *     workflow.onComplete = {
      *         // do something
      *     }
      * </pre>
@@ -199,7 +228,40 @@ class WorkflowMetadata {
      * @param action The action handler
      */
     void setOnComplete( Closure action ) {
-        events << action
+        onCompleteActions << action
+    }
+
+    /**
+     * Implements the following idiom in the pipeline script:
+     * <pre>
+     *     workflow.onError {
+     *         // do something
+     *     }
+     * </pre>
+     * @param action
+     */
+    void onError( Closure action ) {
+
+        final clone = (Closure)action.clone()
+        clone.delegate = owner.session.binding.variables
+        clone.resolveStrategy = Closure.DELEGATE_FIRST
+
+        onErrorActions.add(clone)
+    }
+
+
+    /**
+     * Implements the following idiom in the pipeline script:
+     * <pre>
+     *     workflow.onError = {
+     *         // do something
+     *     }
+     * </pre>
+     *
+     * @param action The action handler
+     */
+    void setOnError( Closure action ) {
+        onErrorActions << action
     }
 
     /**
@@ -209,20 +271,17 @@ class WorkflowMetadata {
      */
     private void registerConfigAction( Map workflowConfig ) {
         if( !workflowConfig ) return
+        // -- register `onComplete`
         if( workflowConfig.onComplete instanceof Closure ) {
             onComplete( (Closure)workflowConfig.onComplete )
         }
+        // -- register `onError`
+        if( workflowConfig.onError instanceof Closure ) {
+            onError( (Closure)workflowConfig.onError )
+        }
     }
 
-    /**
-     * Invoke the execution of the `onComplete` event handler(s)
-     */
-    @PackageScope
-    void invokeOnComplete() {
-        this.complete = new Date()
-        this.duration = Duration.of( complete.time - start.time )
-        this.success = !owner.session.aborted
-
+    private void setErrorAttributes() {
         if( owner.session.fault ) {
             errorReport = owner.session.fault.report
             def task = owner.session.fault.task
@@ -233,16 +292,46 @@ class WorkflowMetadata {
                 if( err ) errorMessage = err.join('\n')
             }
         }
+        else if( owner.session.error ) {
+            def msg = owner.session.error.message ?: owner.session.error.toString()
+            errorMessage = msg
+            errorReport = msg
+        }
         else {
             exitStatus = 0
         }
+    }
 
-        events.each { Closure action ->
+    /**
+     * Invoke the execution of the `onComplete` event handler(s)
+     */
+    @PackageScope
+    void invokeOnComplete() {
+        this.complete = new Date()
+        this.duration = Duration.of( complete.time - start.time )
+        this.success = !(owner.session.aborted || owner.session.cancelled)
+
+        setErrorAttributes()
+
+        onCompleteActions.each { Closure action ->
             try {
                 action.call()
             }
             catch (Exception e) {
                 log.error("Failed to invoke `workflow.onComplete` event handler", e)
+            }
+        }
+    }
+
+    void invokeOnError(trace) {
+        this.success = false
+        setErrorAttributes()
+        onErrorActions.each { Closure action ->
+            try {
+                action.call(trace)
+            }
+            catch (Exception e) {
+                log.error("Failed to invoke `workflow.onError` event handler", e)
             }
         }
     }

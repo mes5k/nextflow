@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -84,8 +84,11 @@ class Global {
             a = ((Map)config.aws).accessKey
             b = ((Map)config.aws).secretKey
 
-            if( a && b )
+            if( a && b ) {
+                log.debug "Using AWS credentials defined in nextflow config file"
                 return [a, b]
+            }
+
         }
 
         // as define by amazon doc
@@ -115,7 +118,7 @@ class Global {
 
         def home = Paths.get(System.properties.get('user.home') as String)
         def files = [ home.resolve('.aws/credentials'), home.resolve('.aws/config') ]
-        getAwsCredentials0(env,config, files)
+        getAwsCredentials0(env, config, files)
 
     }
 
@@ -130,13 +133,15 @@ class Global {
                 return region.toString()
         }
 
-        if( env && env.AWS_REGION )  {
-            return env.AWS_REGION.toString()
+        if( env && env.AWS_DEFAULT_REGION )  {
+            return env.AWS_DEFAULT_REGION.toString()
         }
 
         def home = Paths.get(System.properties.get('user.home') as String)
         def file = home.resolve('.aws/config')
-        if( !file.exists() ) return null
+        if( !file.exists() ) {
+            return null
+        }
 
         def ini = new IniFile(file)
         return ini.section('default').region
@@ -205,9 +210,9 @@ class Global {
         hooks.add(callback)
     }
 
-    static final List<Closure> hooks = []
+    static final private List<Closure> hooks = []
 
-    static private synchronized cleanUp() {
+    static synchronized cleanUp() {
         for( Closure c : hooks ) {
             try {
                 c.call()
@@ -217,15 +222,5 @@ class Global {
             }
         }
     }
-
-    /*
-     * Global shutdown hook
-     */
-    static {
-        Runtime.getRuntime().addShutdownHook {
-            cleanUp()
-        }
-    }
-
 
 }

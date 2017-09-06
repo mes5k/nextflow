@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -24,12 +24,15 @@ import java.nio.file.Files
 import nextflow.Session
 import nextflow.executor.NopeTaskHandler
 import nextflow.processor.TaskConfig
+import nextflow.processor.TaskId
 import nextflow.processor.TaskProcessor
 import nextflow.processor.TaskRun
 import nextflow.processor.TaskStatus
 import nextflow.util.CacheHelper
 import nextflow.util.Duration
 import spock.lang.Specification
+import test.TestHelper
+
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -97,7 +100,7 @@ class TraceFileObserverTest extends Specification {
         def file = testFolder.resolve('trace')
 
         // the handler
-        def task = new TaskRun(id:111, name:'simple_task', hash: CacheHelper.hasher(1).hash(), config: new TaskConfig())
+        def task = new TaskRun(id:TaskId.of(111), name:'simple_task', hash: CacheHelper.hasher(1).hash(), config: new TaskConfig())
         task.processor = Mock(TaskProcessor)
         task.processor.getSession() >> new Session()
         task.processor.getName() >> 'x'
@@ -111,28 +114,28 @@ class TraceFileObserverTest extends Specification {
         when:
         observer.onFlowStart(null)
         then:
-        observer.current == [:]
+        observer.current.isEmpty()
 
         when:
         handler.status = TaskStatus.SUBMITTED
         observer.onProcessSubmit( handler )
-        def record = observer.current.get(111)
+        def record = observer.current.get(TaskId.of(111))
         then:
         observer.separator == '\t'
-        record.taskId == 111
+        record.taskId == 111L
         record.name == 'simple_task'
         record.submit >= now
         record.start == 0
-        observer.current.containsKey(111)
+        observer.current.containsKey(TaskId.of(111))
 
         when:
         sleep 50
         handler.status = TaskStatus.RUNNING
         observer.onProcessStart( handler )
-        record = observer.current.get(111)
+        record = observer.current.get(TaskId.of(111))
         then:
         record.start >= record.submit
-        observer.current.containsKey(111)
+        observer.current.containsKey(TaskId.of(111))
 
         when:
         sleep 50
@@ -140,7 +143,7 @@ class TraceFileObserverTest extends Specification {
         handler.task.exitStatus = 127
         observer.onProcessComplete(handler)
         then:
-        !(observer.current.containsKey(111))
+        !(observer.current.containsKey(TaskId.of(111)))
 
         when:
         record = handler.getTraceRecord()
@@ -233,8 +236,8 @@ class TraceFileObserverTest extends Specification {
 
         given:
         final KB = 1024L
-
-        final traceText =  '''
+        final file = TestHelper.createInMemTempFile('trace')
+        file.text =  '''
                 pid state %cpu %mem vmem rss peak_vmem peak_rss rchar wchar syscr syscw read_bytes write_bytes
                 18 0 7999 46 7868980 6694900 7876620 6702144 2147483647 2147483647 44001533 148401890 2147483647 2147483647
                 9005022
@@ -243,7 +246,7 @@ class TraceFileObserverTest extends Specification {
 
         when:
         def handler = [:] as TraceRecord
-        def record = handler.parseTraceFile(traceText)
+        def record = handler.parseTraceFile(file)
         record.task_id = 3
         record.hash = '9a/a894b2'
         record.native_id = '2000'

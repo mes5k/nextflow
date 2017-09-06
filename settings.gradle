@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,10 +21,10 @@
 include 'my-capsule'
 include 'nxf-commons'
 include 'nxf-dnanexus'
-include 'nxf-extrae'
 include 'nxf-console'
 include 'nxf-drmaa'
 include 'nxf-ignite'
+include 'nxf-httpfs'
 
 rootProject.children.each { prj ->
     prj.projectDir = new File("$rootDir/subprojects/$prj.name")

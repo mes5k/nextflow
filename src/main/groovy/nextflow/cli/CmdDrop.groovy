@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -37,7 +37,7 @@ import nextflow.scm.AssetManager
 @Parameters(commandDescription = "Delete the local copy of a project")
 class CmdDrop extends CmdBase {
 
-    static final NAME = 'drop'
+    static final public NAME = 'drop'
 
     @Parameter(required=true, description = 'name of the project to drop')
     List<String> args

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -44,6 +44,15 @@ if (System.getenv('CI_GROOVY_VERSION')) {
                 }
             }
         }
+
+        configurations.all {
+            resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+                if (details.requested.group == 'org.codehaus.groovy') {
+                    details.useVersion(groovyVer)
+                    println ">> Overriding $details.requested with version: $groovyVer"
+                }
+            }
+        }
     }
     logger.lifecycle "Overriden Groovy dependency to use $groovyVer"
 }
@@ -55,13 +64,14 @@ ext {
 allprojects {
     apply plugin: 'java'
 
-    version = '0.19.3'
+    version = '0.25.5'
     group = 'io.nextflow'
 
     sourceCompatibility = 1.7
     targetCompatibility = 1.7
 
     repositories {
+        jcenter()
         mavenCentral()
         maven { url 'http://uk.maven.org/maven2' }
         maven { url 'http://dl.bintray.com/paolo-ditommaso/maven'}
@@ -99,7 +109,6 @@ allprojects {
 
 configurations {
     capsule
-    extrae
     //provided
     drmaa.extendsFrom runtime
     dnanexus.extendsFrom runtime
@@ -110,28 +119,33 @@ configurations {
 
 dependencies {
     compile(project(':nxf-commons'))
-    compile "org.codehaus.groovy:groovy:2.4.5"
-    compile "org.codehaus.groovy:groovy-nio:2.4.5"
-    compile "org.codehaus.groovy:groovy-json:2.4.5"
-    compile "org.codehaus.groovy:groovy-templates:2.4.5"
+    compile(project(':nxf-httpfs'))
+    compile "org.codehaus.groovy:groovy:2.4.11"
+    compile "org.codehaus.groovy:groovy-nio:2.4.11"
+    compile "org.codehaus.groovy:groovy-json:2.4.11"
+    compile "org.codehaus.groovy:groovy-templates:2.4.11"
     compile "org.slf4j:jcl-over-slf4j:1.7.21"
     compile "org.slf4j:jul-to-slf4j:1.7.21"
     compile "org.slf4j:log4j-over-slf4j:1.7.21"
-    compile "ch.qos.logback:logback-classic:1.1.6"
-    compile "ch.qos.logback:logback-core:1.1.6"
+    compile "ch.qos.logback:logback-classic:1.1.10"
+    compile "ch.qos.logback:logback-core:1.1.10"
     compile "org.codehaus.gpars:gpars:1.2.1"
     compile("ch.grengine:grengine:1.0.3") { exclude group: 'org.codehaus.groovy', module: 'groovy-all' }
     compile "commons-lang:commons-lang:2.6"
     compile "com.beust:jcommander:1.35"
-    compile "com.google.code.findbugs:jsr305:1.3.9"
     compile("com.esotericsoftware.kryo:kryo:2.24.0") { exclude group: 'com.esotericsoftware.minlog', module: 'minlog' }
     compile('org.iq80.leveldb:leveldb:0.7')
     compile('org.eclipse.jgit:org.eclipse.jgit:4.3.1.201605051710-r') { exclude group: 'commons-logging', module: 'commons-logging' }
     compile('io.nextflow:nxf-s3fs:1.0.0') {
         exclude group: 'commons-logging', module: 'commons-logging'
         exclude group: 'org.apache.tika', module: 'tika-core'
+        exclude group: 'com.amazonaws', module: 'aws-java-sdk-s3'
     }
     compile('com.corundumstudio.socketio:netty-socketio:1.7.7')
+    compile ('com.amazonaws:aws-java-sdk-s3:1.11.25') { exclude group: 'commons-logging', module: 'commons-logging' }
+    compile ('com.amazonaws:aws-java-sdk-ec2:1.11.25') { exclude group: 'commons-logging', module: 'commons-logging' }
+    compile ('javax.mail:mail:1.4.7')
+    compile ('org.yaml:snakeyaml:1.18')
 
     // include Ivy at runtime in order to have Grape @Grab work correctly
     runtime "org.apache.ivy:ivy:2.3.0"
@@ -142,9 +156,6 @@ dependencies {
 
     // Capsule manages the fat jar building process
     capsule(project(':my-capsule'))
-
-    // Extrae tracing sub-module
-    extrae(project(':nxf-extrae')) { transitive = false }
 
     // DnaNexus build dependencies
     dnanexus(project(':nxf-dnanexus')) {
@@ -165,8 +176,8 @@ dependencies {
 
     // Documentation required libraries
     gdocLibs 'org.fusesource.jansi:jansi:1.11'
-    gdocLibs "org.codehaus.groovy:groovy-groovydoc:2.4.5"
-    gdocLibs "org.codehaus.groovy:groovy-ant:2.4.5"
+    gdocLibs "org.codehaus.groovy:groovy-groovydoc:2.4.11"
+    gdocLibs "org.codehaus.groovy:groovy-ant:2.4.11"
 
 }
 
@@ -174,6 +185,7 @@ dependencies {
 // http://forums.gradle.org/gradle/topics/gradle_task_groovydoc_failing_with_noclassdeffounderror
 groovydoc {
     groovyClasspath = project.configurations.gdocLibs
+    includes  = ["nextflow/**"]
 }
 
 //sourceSets.main.compileClasspath += configurations.provided
@@ -200,7 +212,7 @@ compileGroovy {
 /*
  * Update the build timestamp in the source source file
  */
-task buildInfo << {
+task buildInfo { doLast {
 
     def file = new File('./src/main/groovy/nextflow/Const.groovy')
     def buildNum = 0
@@ -229,7 +241,7 @@ task buildInfo << {
     src = src.replaceAll(/version *= *'[0-9a-zA-Z_\-\.]+'/, "version = '$major'" as String)
     src = src.replaceAll(/release *= *'[0-9a-zA-Z_\-\.]+'/, "release = '$version'" as String)
     file.text = src
-}
+}}
 
 String bytesToHex(byte[] bytes) {
     StringBuffer result = new StringBuffer();
@@ -237,7 +249,7 @@ String bytesToHex(byte[] bytes) {
     return result.toString();
 }
 
-task makeSha1 << {
+task makeDigest { doLast {
     byte[] digest
     String  str = file('nextflow').text
     // create sha1
@@ -246,7 +258,10 @@ task makeSha1 << {
     // create sha-256
     digest = java.security.MessageDigest.getInstance("SHA-256").digest(str.getBytes())
     file('nextflow.sha256').text = bytesToHex(digest) + '\n'
-}
+    // create md5
+    digest = java.security.MessageDigest.getInstance("MD5").digest(str.getBytes())
+    file('nextflow.md5').text = bytesToHex(digest) + '\n'
+}}
 
 /*
  * Compile sources and copies all libs to target directory
@@ -262,25 +277,25 @@ task compile {
  * @link https://github.com/puniverse/capsule
  */
 
-ext.ossrhUserName = hasProperty('ossrhUserName') ? properties.get('ossrhUserName') : null
-ext.ossrhPassword = hasProperty('ossrhPassword') ? properties.get('ossrhPassword') : null
-ext.ossrhFullName = hasProperty('ossrhFullName') ? properties.get('ossrhFullName') : null
-ext.ossrhEmail = hasProperty('ossrhEmail') ? properties.get('ossrhEmail') : null
+ext.ossrhUserName = project.findProperty('ossrhUserName')
+ext.ossrhPassword = project.findProperty('ossrhPassword')
+ext.ossrhFullName = project.findProperty('ossrhFullName')
+ext.ossrhEmail = project.findProperty('ossrhEmail')
 
 ext.homeDir = System.properties['user.home']
 ext.nextflowDir = "$homeDir/.nextflow/framework/$version"
 ext.releaseDir = "$buildDir/releases"
 ext.s3CmdOpts="--acl public-read --storage-class REDUCED_REDUNDANCY --region eu-west-1"
 // `signing.keyId` property needs to be defined in the `gradle.properties` file
-ext.enableSignArchives = hasProperty('signing.keyId')
+ext.enableSignArchives = project.findProperty('signing.keyId')
 
 ext.deployable = []
 ext.deployable << project(':')
 ext.deployable << project(':nxf-commons')
-ext.deployable << project(':nxf-extrae')
 ext.deployable << project(':nxf-ignite')
 ext.deployable << project(':nxf-console')
 ext.deployable << project(':nxf-drmaa')
+ext.deployable << project(':nxf-httpfs')
 
 protected error(String message) {
     logger.error message
@@ -330,7 +345,7 @@ task packOne(type: Jar) {
     from (configurations.capsule.collect { zipTree(it) })
 
     // main manifest attributes
-    def deps = resolveDeps('runtime', "io.nextflow:nxf-extrae:${version}")
+    def deps = resolveDeps('runtime')
 
     manifest.attributes(
                 'Main-Class'        : 'CapsuleLoader',
@@ -364,7 +379,7 @@ task packOne(type: Jar) {
     /*
      * `drmaa` dependencies
      */
-    deps = resolveDeps('drmaa', "io.nextflow:nxf-extrae:${version}")
+    deps = resolveDeps('drmaa')
     manifest.attributes('Dependencies': deps, 'drmaa')
 
     doLast {
@@ -380,7 +395,6 @@ task packAll(type: Jar) {
 
     from jar // embed our application jar
     from (configurations.ignite)
-    from (configurations.extrae) // add the extrae module
     from (configurations.capsule.collect { zipTree(it) })
 
     manifest.attributes( 'Main-Class'        : 'CapsuleLoader',
@@ -443,7 +457,7 @@ task pack( dependsOn: [packOne, packDx, packAll]) {
 }
 
 
-task deploy( type: Exec, dependsOn: [clean, pack, deployable.uploadArchives, makeSha1]) {
+task deploy( type: Exec, dependsOn: [clean, pack, deployable.uploadArchives, makeDigest]) {
 
     def temp = File.createTempFile('upload',null)
     temp.deleteOnExit()
@@ -461,7 +475,8 @@ task deploy( type: Exec, dependsOn: [clean, pack, deployable.uploadArchives, mak
         files << file('nextflow').absoluteFile
         files << file('nextflow.sha1').absoluteFile
         files << file('nextflow.sha256').absoluteFile
-
+        files << file('nextflow.md5').absoluteFile
+        
         println "Uploading artifacts: "
         files.each { println "- $it"}
 
@@ -481,10 +496,25 @@ task installLauncher(type: Copy, dependsOn: ['pack']) {
     into "$homeDir/.nextflow/framework/$version/"
 }
 
+task dockerImage(type: Exec, dependsOn: deploy) {
+
+    def temp = File.createTempFile('upload',null)
+    temp.deleteOnExit()
+    temp.text =  """\
+    cd docker
+    docker build -t nextflow/nextflow:$version .
+    docker tag nextflow/nextflow:$version nextflow/nextflow:latest
+    docker push nextflow/nextflow:$version
+    docker push nextflow/nextflow:latest
+    """.stripIndent()
+
+    commandLine 'bash', '-e', temp.absolutePath
+}
+
 /*
  * Tag and upload the release
  */
-task release(type: Exec, dependsOn: pack) {
+task release(type: Exec, dependsOn: [pack, dockerImage]) {
 
     def launcherFile = file('nextflow').absoluteFile
     def launcherSha1 = file('nextflow.sha1').absoluteFile
@@ -508,6 +538,7 @@ task release(type: Exec, dependsOn: pack) {
     aws s3 cp $launcherFile s3://www.nextflow.io/releases/latest/nextflow $s3CmdOpts
     aws s3 cp $launcherSha1 s3://www.nextflow.io/releases/latest/nextflow.sha1 $s3CmdOpts
     aws s3 cp $launcherSha256 s3://www.nextflow.io/releases/latest/nextflow.sha256 $s3CmdOpts
+    aws s3 cp $launcherSha256 s3://www.nextflow.io/releases/latest/nextflow.md5 $s3CmdOpts
     """.stripIndent()
 
     commandLine 'bash', '-e', temp.absolutePath
@@ -570,10 +601,10 @@ task dnanexus(dependsOn: packDx) {
  * Save the runtime classpath
  */
 task exportClasspath {
-    dependsOn configurations.ignite, configurations.extrae, configurations.console
+    dependsOn configurations.ignite, configurations.console
 
     def home = System.getProperty('user.home')
-    def all = configurations.ignite + configurations.extrae + configurations.console
+    def all = configurations.ignite + configurations.console
     def libs = all.collect { File file -> /* println file.canonicalPath.replace(home, '$HOME'); */ file.canonicalPath;  }
     new File('.launch.classpath').text = libs.join(':')
 }
@@ -600,7 +631,7 @@ configure(deployable) {
 
     task javadocJar(type: Jar) {
         classifier = 'javadoc'
-        from javadoc
+        from groovydoc
     }
 
     task sourcesJar(type: Jar) {

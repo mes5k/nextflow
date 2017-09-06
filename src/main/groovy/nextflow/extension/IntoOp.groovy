@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -75,6 +75,10 @@ class IntoOp {
 
         final names = CaptureProperties.capture(holder)
         final binding = Global.session.binding
+        if( !names )
+            throw new IllegalArgumentException("Missing target channel names in `into` operator")
+        if( names.size() == 1 )
+            log.warn("The `into` operator should be used to connect two or more target channels -- consider to replace it with `.set { ${names[0]} }`")
 
         def targets = []
         names.each { identifier ->
@@ -96,7 +100,7 @@ class IntoOp {
         params.outputs = outputs
         params.listeners = createListener()
 
-        DataflowExtensions.newOperator(params, new ChainWithClosure(new CopyChannelsClosure()))
+        DataflowHelper.newOperator(params, new ChainWithClosure(new CopyChannelsClosure()))
 
         return this
     }

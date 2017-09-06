@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,21 +19,30 @@
  */
 
 package nextflow.cli
+import java.nio.file.Files
+import java.nio.file.Path
+
 import com.beust.jcommander.DynamicParameter
 import com.beust.jcommander.IStringConverter
 import com.beust.jcommander.Parameter
 import com.beust.jcommander.Parameters
+import groovy.json.JsonSlurper
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import groovyx.gpars.GParsConfig
 import nextflow.Const
-import nextflow.exception.AbortOperationException
-import nextflow.scm.AssetManager
 import nextflow.config.ConfigBuilder
+import nextflow.exception.AbortOperationException
+import nextflow.file.FileHelper
+import nextflow.scm.AssetManager
 import nextflow.script.ScriptFile
 import nextflow.script.ScriptRunner
+import nextflow.util.ConfigHelper
 import nextflow.util.CustomPoolFactory
 import nextflow.util.Duration
+import nextflow.util.HistoryFile
+import org.yaml.snakeyaml.Yaml
+
 /**
  * CLI sub-command RUN
  *
@@ -44,8 +53,11 @@ import nextflow.util.Duration
 @Parameters(commandDescription = "Execute a pipeline project")
 class CmdRun extends CmdBase implements HubOptions {
 
+
+    static List<String> VALID_PARAMS_FILE = ['json', 'yml', 'yaml']
+
     static {
-        // installing a custom pool factory for GPars threads
+        // install the custom pool factory for GPars threads
         GParsConfig.poolFactory = new CustomPoolFactory()
     }
 
@@ -58,7 +70,10 @@ class CmdRun extends CmdBase implements HubOptions {
         }
     }
 
-    static final NAME = 'run'
+    static final public NAME = 'run'
+
+    @Parameter(names=['-name'], description = 'Assign a mnemonic name to the a pipeline run')
+    String runName
 
     @Parameter(names=['-lib'], description = 'Library extension path')
     String libPath
@@ -89,6 +104,9 @@ class CmdRun extends CmdBase implements HubOptions {
      */
     @DynamicParameter(names = '--', description = 'Set a parameter used by the pipeline', hidden = true)
     Map<String,String> params = new LinkedHashMap<>()
+
+    @Parameter(names='-params-file', description = 'Load script parameters from a JSON/YAML file')
+    String paramsFile
 
     @DynamicParameter(names = ['-process.'], description = 'Set process default options' )
     Map<String,String> process = [:]
@@ -129,6 +147,9 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names = ['-with-broadcast'], description = 'Create a trace event broadcast server')
     String withBroadcast
 
+    @Parameter(names = '-with-singularity', description = 'Enable process execution in a Singularity container')
+    def withSingularity
+
     @Parameter(names = '-with-docker', description = 'Enable process execution in a Docker container')
     def withDocker
 
@@ -155,6 +176,9 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names=['-profile'], description = 'Choose a configuration profile')
     String profile
 
+    @Parameter(names=['-dump-hashes'], description = 'Dump task hash keys for debugging purpose')
+    boolean dumpHashes
+
     @Override
     final String getName() { NAME }
 
@@ -167,6 +191,7 @@ class CmdRun extends CmdBase implements HubOptions {
         if( withDocker && withoutDocker )
             throw new AbortOperationException("Command line options `-with-docker` and `-without-docker` cannot be specified at the same time")
 
+        checkRunName()
 
         log.info "N E X T F L O W  ~  version ${Const.APP_VER}"
         log.info "with broadcast: ${withBroadcast}"
@@ -181,7 +206,6 @@ class CmdRun extends CmdBase implements HubOptions {
                         .setCmdRun(this)
                         .setBaseDir(scriptFile.parent)
                         .build()
-                        .toMap()
 
         // -- create a new runner instance
         final runner = new ScriptRunner(config)
@@ -190,19 +214,31 @@ class CmdRun extends CmdBase implements HubOptions {
 
         if( this.test ) {
             runner.test(this.test, scriptArgs)
+            return
         }
-        else {
-            def info = CmdInfo.status( log.isTraceEnabled() )
-            log.debug( '\n'+info )
 
-            // -- add this run to the local history
-            runner.verifyAndTrackHistory(launcher.cliString)
+        def info = CmdInfo.status( log.isTraceEnabled() )
+        log.debug( '\n'+info )
 
-            // -- run it!
-            runner.execute(scriptArgs)
-        }
+        // -- add this run to the local history
+        runner.verifyAndTrackHistory(launcher.cliString, runName)
+
+        // -- run it!
+        runner.execute(scriptArgs)
     }
 
+    private void checkRunName() {
+        if( runName == 'last' )
+            throw new AbortOperationException("Not a valid run name: `last`")
+
+        if( !runName ) {
+            // -- make sure the generated name does not exist already
+            runName = HistoryFile.DEFAULT.generateNextName()
+        }
+
+        else if( HistoryFile.DEFAULT.checkExistsByName(runName) )
+            throw new AbortOperationException("Run name `$runName` has been already used -- Specify a different one")
+    }
 
     protected ScriptFile getScriptFile(String pipelineName) {
         assert pipelineName
@@ -232,8 +268,9 @@ class CmdRun extends CmdBase implements HubOptions {
         if( script.exists() ) {
             if( revision )
                 throw new AbortOperationException("Revision option cannot be used running a script")
-            log.info "Launching $script"
-            return new ScriptFile(script)
+            def result = new ScriptFile(script)
+            log.info "Launching `$script` [$runName] - revision: ${result.getScriptId()?.substring(0,10)}"
+            return result
         }
 
         /*
@@ -253,7 +290,7 @@ class CmdRun extends CmdBase implements HubOptions {
             manager.checkout(revision)
             manager.updateModules()
             def scriptFile = manager.getScriptFile()
-            log.info "Launching '${repo}' - revision: ${scriptFile.revisionInfo}"
+            log.info "Launching `$repo` [$runName] - revision: ${scriptFile.revisionInfo}"
             // return the script file
             return scriptFile
         }
@@ -281,5 +318,59 @@ class CmdRun extends CmdBase implements HubOptions {
         return result
     }
 
+    Map getParsedParams() {
 
+        def result = [:]
+
+        if( paramsFile ) {
+            def path = validateParamsFile(paramsFile)
+            def ext = path.extension.toLowerCase() ?: null
+            if( ext == 'json' )
+                readJsonFile(path, result)
+            else if( ext == 'yml' || ext == 'yaml' )
+                readYamlFile(path, result)
+        }
+
+        // read the params file if any
+
+        // set the CLI params
+        params?.each { key, value ->
+            result.put( key, ConfigHelper.parseValue(value) )
+        }
+        return result
+    }
+
+    private Path validateParamsFile(String file) {
+
+        def result = FileHelper.asPath(file)
+        if( !result.exists() )
+            throw new AbortOperationException("Specified params file does not exists: $file")
+
+        def ext = result.getExtension()
+        if( !VALID_PARAMS_FILE.contains(ext) )
+            throw new AbortOperationException("Not a valid params file extension: $file -- It must be one of the following: ${VALID_PARAMS_FILE.join(',')}")
+
+        return result
+    }
+
+
+    private void readJsonFile(Path file, Map result) {
+        try {
+            def json = (Map)new JsonSlurper().parse(Files.newInputStream(file))
+            result.putAll(json)
+        }
+        catch( Exception e ) {
+            throw new AbortOperationException("Cannot parse params file: $file", e)
+        }
+    }
+
+    private void readYamlFile(Path file, Map result) {
+        try {
+            def yaml = (Map)new Yaml().load(Files.newInputStream(file))
+            result.putAll(yaml)
+        }
+        catch( Exception e ) {
+            throw new AbortOperationException("Cannot parse params file: $file", e)
+        }
+    }
 }

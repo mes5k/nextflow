@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -23,14 +23,15 @@ import java.nio.file.Path
 
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
-import nextflow.processor.TaskBean
-import nextflow.processor.TaskProcessor
-import nextflow.processor.TaskRun
 import nextflow.container.ContainerBuilder
 import nextflow.container.ContainerScriptTokens
 import nextflow.container.DockerBuilder
 import nextflow.container.ShifterBuilder
-
+import nextflow.container.SingularityBuilder
+import nextflow.container.UdockerBuilder
+import nextflow.processor.TaskBean
+import nextflow.processor.TaskProcessor
+import nextflow.processor.TaskRun
 /**
  * Builder to create the BASH script which is used to
  * wrap and launch the user task
@@ -64,7 +65,7 @@ class BashWrapperBuilder {
         catch( Exception e ) {
             log.warn "Invalid value for `NXF_DEBUG` variable: $str -- See http://www.nextflow.io/docs/latest/config.html#environment-variables"
         }
-        BASH = Collections.unmodifiableList(  level > 1 ? ['/bin/bash','-uex'] : ['/bin/bash','-ue'] )
+        BASH = Collections.unmodifiableList(  level > 0 ? ['/bin/bash','-uex'] : ['/bin/bash','-ue'] )
 
     }
 
@@ -96,17 +97,20 @@ class BashWrapperBuilder {
             walk $1
         }
 
-        function nxf_mktemp() {
+        nxf_mktemp() {
             local base=${1:-/tmp}
-            [[ $(uname) = Darwin ]] && mktemp -d $base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p $base
+            if [[ $(uname) = Darwin ]]; then mktemp -d $base/nxf.XXXXXXXXXX
+            else TMPDIR="$base" mktemp -d -t nxf.XXXXXXXXXX
+            fi
         }
 
         on_exit() {
           exit_status=${ret:=$?}
           printf $exit_status > __EXIT_FILE__
-          rm -f "$COUT" || true
-          rm -f "$CERR" || true
-          exit $exit_status
+          set +u
+          [[ "$COUT" ]] && rm -f "$COUT" || true
+          [[ "$CERR" ]] && rm -f "$CERR" || true
+          __EXIT_CMD__
         }
 
         on_term() {
@@ -125,6 +129,20 @@ class BashWrapperBuilder {
     // PID, STATE, %CPU, %MEM, VSIZE, RSS; VmPeak, VmHWM; RCHAR, WCHAR, syscr, syscw, READ_BYTES, WRITE_BYTES, CANCEL_W_BYTES
     @PackageScope
     static final String SCRIPT_TRACE = '''
+        nxf_kill() {
+            declare -a ALL_CHILD
+            while read P PP;do
+                ALL_CHILD[$PP]+=" $P"
+            done < <(ps -e -o pid= -o ppid=)
+
+            walk() {
+                [[ $1 != $$ ]] && kill $1 2>/dev/null || true
+                for i in ${ALL_CHILD[$1]:=}; do walk $i; done
+            }
+
+            walk $1
+        }
+
         nxf_tree() {
             declare -a ALL_CHILD
             while read P PP;do
@@ -132,7 +150,7 @@ class BashWrapperBuilder {
             done < <(ps -e -o pid= -o ppid=)
 
             stat() {
-                local x_ps=$(ps -o pid=,state=,pcpu=,pmem=,vsz=,rss= $1)
+                local x_ps=$(ps -o pid= -o state= -o pcpu= -o pmem= -o vsz= -o rss= $1)
                 local x_io=$(cat /proc/$1/io 2> /dev/null | sed 's/^.*:\\s*//' | tr '\\n' ' ')
                 local x_vm=$(cat /proc/$1/status 2> /dev/null | egrep 'VmPeak|VmHWM' | sed 's/^.*:\\s*//' | sed 's/[\\sa-zA-Z]*$//' | tr '\\n' ' ')
                 [[ ! $x_ps ]] && return 0
@@ -156,25 +174,20 @@ class BashWrapperBuilder {
             local tot=\'\'
             if [[ "$data" ]]; then
               tot=$(awk '{ t3+=($3*10); t4+=($4*10); t5+=$5; t6+=$6; t7+=$7; t8+=$8; t9+=$9; t10+=$10; t11+=$11; t12+=$12; t13+=$13; t14+=$14 } END { printf "%d 0 %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f\\n", NR,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12,t13,t14 }' <<< "$data")
-              printf "$tot\\n"
+              printf "$tot\\n" || true
             fi
         }
 
         nxf_sleep() {
           if [[ $1 < 0 ]]; then sleep 5;
-          elif [[ $1 < 10 ]]; then sleep 0.1;
+          elif [[ $1 < 10 ]]; then sleep 0.1 2>/dev/null || sleep 1;
           elif [[ $1 < 130 ]]; then sleep 1;
           else sleep 5; fi
         }
 
         nxf_date() {
-            case `uname` in
-                Darwin) if hash gdate 2>/dev/null; then echo 'gdate +%s%3N'; else echo 'date +%s000'; fi;;
-                *) echo 'date +%s%3N';;
-            esac
+            local ts=$(date +%s%3N); [[ $ts == *3N ]] && date +%s000 || echo $ts
         }
-
-        NXF_DATE=$(nxf_date)
 
         nxf_trace() {
           local pid=$1; local trg=$2;
@@ -201,11 +214,12 @@ class BashWrapperBuilder {
     static final String MODULE_LOAD = '''
         nxf_module_load(){
           local mod=$1
-          local ver=$2
-          local new_module="$mod/$ver"
+          local ver=${2:-}
+          local new_module="$mod"; [[ $ver ]] && new_module+="/$ver"
+
           if [[ ! $(module list 2>&1 | grep -o "$new_module") ]]; then
             old_module=$(module list 2>&1 | grep -Eo "$mod\\/[^\\( \\n]+" || true)
-            if [[ $old_module ]]; then
+            if [[ $ver && $old_module ]]; then
               module switch $old_module $new_module
             else
               module load $new_module
@@ -223,10 +237,6 @@ class BashWrapperBuilder {
 
     private boolean runWithContainer
 
-    private boolean isDockerEnabled
-
-    private boolean isShifterEnabled
-
     BashWrapperBuilder( TaskRun task ) {
         this(new TaskBean(task))
     }
@@ -239,7 +249,7 @@ class BashWrapperBuilder {
     /**
      * @return The bash script fragment to change to the 'scratch' directory if it has been specified in the task configuration
      */
-    protected String changeToScratchDirectory() {
+    protected String getScratchDirectoryCommand() {
 
         // convert to string for safety
         final scratchStr = scratch?.toString()
@@ -253,14 +263,25 @@ class BashWrapperBuilder {
          * try to use the 'TMP' variable, if does not exist fallback to a tmp folder
          */
         if( scratchStr == 'true' ) {
-            return 'NXF_SCRATCH="$(set +u; nxf_mktemp $TMPDIR)" && cd $NXF_SCRATCH'
+            return 'NXF_SCRATCH="$(set +u; nxf_mktemp $TMPDIR)"'
         }
 
         if( scratchStr.toLowerCase() in ['ramdisk','ram-disk']) {
-            return 'NXF_SCRATCH="$(nxf_mktemp /dev/shm/)" && cd $NXF_SCRATCH'
+            return 'NXF_SCRATCH="$(nxf_mktemp /dev/shm/)"'
         }
 
-        return "NXF_SCRATCH=\"\$(set +u; nxf_mktemp $scratchStr)\" && cd \$NXF_SCRATCH"
+        return "NXF_SCRATCH=\"\$(set +u; nxf_mktemp $scratchStr)\""
+    }
+
+    /**
+     * Setup container related variables
+     */
+    protected boolean containerInit() {
+        containerImage && (executable || containerConfig.isEnabled())
+    }
+
+    protected boolean fixOwnership() {
+        systemOsName == 'Linux' && containerConfig?.fixOwnership && containerInit() && containerConfig.engine == 'docker' // <-- note: only for docker (shifter is not affected)
     }
 
     /**
@@ -280,10 +301,8 @@ class BashWrapperBuilder {
         final wrapperFile = workDir.resolve(TaskRun.CMD_RUN)
         final stubFile = workDir.resolve(TaskRun.CMD_STUB)
 
-        // set true when running with docker
-        isDockerEnabled = dockerConfig?.enabled?.toString() == 'true'
-        isShifterEnabled = shifterConfig?.enabled?.toString() == 'true'
-        runWithContainer = this.containerImage && (executable || isDockerEnabled || isShifterEnabled)
+        // set true when running with through a container engine
+        runWithContainer = containerInit()
 
         /*
          * save the input when required
@@ -311,7 +330,7 @@ class BashWrapperBuilder {
         }
 
         // whenever it has to change to the scratch directory
-        final changeDir = changeToScratchDirectory()
+        final changeDir = getScratchDirectoryCommand()
 
         /*
          * process the task script
@@ -362,22 +381,20 @@ class BashWrapperBuilder {
         wrapper << '# NEXTFLOW TASK: ' << name << ENDL
         wrapper << 'set -e' << ENDL
         wrapper << 'set -u' << ENDL
-        wrapper << 'NXF_DEBUG=${NXF_DEBUG:=0}; [[ $NXF_DEBUG > 2 ]] && set -x' << ENDL << ENDL
+        wrapper << 'NXF_DEBUG=${NXF_DEBUG:=0}; [[ $NXF_DEBUG > 1 ]] && set -x' << ENDL << ENDL
 
         if( runWithContainer ) {
             containerBuilder.appendHelpers(wrapper)
             // append the process - or - container kill command
-            wrapper << scriptCleanUp(exitedFile, containerBuilder.killCommand) << ENDL
+            wrapper << scriptCleanUp(exitedFile, changeDir, containerBuilder) << ENDL
             // create a random string id to be used an container name
             wrapper << 'export NXF_BOXID="nxf-$(dd bs=18 count=1 if=/dev/urandom 2>/dev/null | base64 | tr +/ 0A)"' << ENDL
-            // append to script file chown command to change `root` owner of files created by docker
-            // note: this is not required when running docker in OSX through boo2docker because it manage correctly files ownership
-            if( systemOsName == 'Linux' && dockerConfig.fixOwnership )
-            scriptFile << "\n# patch root ownership problem of files created with docker\n[ \${NXF_OWNER:=''} ] && chown -fR --from root \$NXF_OWNER ${workDir}/{*,.*} || true\n"
         }
         else {
-            wrapper << scriptCleanUp(exitedFile) << ENDL
+            wrapper << scriptCleanUp(exitedFile, changeDir, null) << ENDL
         }
+
+        wrapper << ( changeDir ?: "NXF_SCRATCH=''" ) << ENDL
 
         // -- print the current environment when debug is enabled
         wrapper << '[[ $NXF_DEBUG > 0 ]] && nxf_env' << ENDL
@@ -396,13 +413,13 @@ class BashWrapperBuilder {
         }
 
         // source the environment
+        // note: skip this when it's a containerized task because in that case
+        //  the environment is provided using container specific options
         if( !runWithContainer ) {
             wrapper << "[ -f "<< fileStr(environmentFile) << " ]" << " && source " << fileStr(environmentFile) << ENDL
         }
 
-        if( changeDir ) {
-            wrapper << changeDir << ENDL
-        }
+        wrapper << '[[ $NXF_SCRATCH ]] && echo "nxf-scratch-dir $HOSTNAME:$NXF_SCRATCH" && cd $NXF_SCRATCH' << ENDL
 
         // staging input files when required
         def stagingScript = copyStrategy.getStageInputFilesScript()
@@ -424,21 +441,24 @@ class BashWrapperBuilder {
         // execute by invoking the command through a Docker container
         if( containerBuilder && !executable ) {
             containerBuilder.appendRunCommand(wrapper) << " -c \""
+            if( containerBuilder instanceof SingularityBuilder ) {
+                wrapper << 'cd $PWD; ' << containerBuilder.getEnvExports()
+            }
         }
 
         /*
          * process stats
          */
-        if( statsEnabled ) {
+        if( statsEnabled || fixOwnership() ) {
             final stub = new StringBuilder()
             stub << '#!/bin/bash' << ENDL
             stub << 'set -e' << ENDL
             stub << 'set -u' << ENDL
-            stub << 'NXF_DEBUG=${NXF_DEBUG:=0}; [[ $NXF_DEBUG > 3 ]] && set -x' << ENDL << ENDL
+            stub << 'NXF_DEBUG=${NXF_DEBUG:=0}; [[ $NXF_DEBUG > 2 ]] && set -x' << ENDL << ENDL
             stub << SCRIPT_TRACE << ENDL
             stub << 'trap \'exit ${ret:=$?}\' EXIT' << ENDL
             stub << 'touch ' << TaskRun.CMD_TRACE << ENDL
-            stub << 'start_millis=$($NXF_DATE)'  << ENDL
+            stub << 'start_millis=$(nxf_date)'  << ENDL
             stub << '(' << ENDL
             stub << interpreter << " " << fileStr(scriptFile)
             if( input != null ) stub << " < " << fileStr(inputFile)
@@ -448,9 +468,14 @@ class BashWrapperBuilder {
             stub << 'nxf_trace "$pid" ' << TaskRun.CMD_TRACE << ' &' << ENDL
             stub << 'mon=$!' << ENDL                     // get the pid of the monitor process
             stub << 'wait $pid || ret=$?' << ENDL        // wait for main job completion and get its exit status
-            stub << 'end_millis=$($NXF_DATE)' << ENDL    // get the ending time
-            stub << 'kill $mon || wait $mon' << ENDL     // kill the monitor and wait for its ending
+            stub << 'end_millis=$(nxf_date)' << ENDL    // get the ending time
+            stub << 'nxf_kill $mon || wait $mon' << ENDL     // kill the monitor and wait for its ending
             stub << 'echo $((end_millis-start_millis)) >> ' << TaskRun.CMD_TRACE << ENDL
+
+            // append to script file chown command to change `root` owner of files created by docker
+            if( this.fixOwnership() )
+                stub << "\n# patch root ownership problem of files created with docker\n[ \${NXF_OWNER:=''} ] && chown -fR --from root \$NXF_OWNER ${workDir}/{*,.*} || true\n"
+
             // save to file
             stubFile.text = stub.toString()
 
@@ -468,14 +493,6 @@ class BashWrapperBuilder {
         wrapper << 'pid=$!' << ENDL
         wrapper << 'wait $pid || ret=$?' << ENDL
         wrapper << 'wait $tee1 $tee2' << ENDL
-
-        /*
-         * docker clean-up
-         */
-        if( containerBuilder?.removeCommand ) {
-            // remove the container in this way because 'docker run --rm'  fail in some cases -- see https://groups.google.com/d/msg/docker-user/0Ayim0wv2Ls/-mZ-ymGwg8EJ
-            wrapper << containerBuilder.removeCommand << ' &>/dev/null &' << ENDL
-        }
 
         /*
          * un-stage output files
@@ -509,33 +526,29 @@ class BashWrapperBuilder {
      * @return The script string to be included the in main launcher script
      */
     @PackageScope
-    String scriptCleanUp( Path file, String dockerKill = null ) {
+    String scriptCleanUp( Path file, String scratch, ContainerBuilder builder ) {
+
+        final script = []
+
+        // -- the kill command
+        final killCommand = builder?.getKillCommand() ?: '[[ "$pid" ]] && nxf_kill $pid'
+        // -- cleanup the scratch dir
+        if( scratch && cleanup != false ) {
+            script << (!builder ? 'rm -rf $NXF_SCRATCH || true' : '(sudo -n true && sudo rm -rf "$NXF_SCRATCH" || rm -rf "$NXF_SCRATCH")&>/dev/null || true')
+        }
+        // -- remove the container in this way because 'docker run --rm'  fail in some cases -- see https://groups.google.com/d/msg/docker-user/0Ayim0wv2Ls/-mZ-ymGwg8EJ
+        final remove = builder?.getRemoveCommand()
+        if( remove ) {
+            script << "${remove} &>/dev/null || true"
+        }
+        // -- return the exit code
+        script << 'exit $exit_status'
+
+        // -- finally compose the script
         SCRIPT_CLEANUP
                 .replace('__EXIT_FILE__', exitFile(file))
-                .replace('__KILL_CMD__', dockerKill ?: '[[ "$pid" ]] && nxf_kill $pid')
-    }
-
-    ContainerBuilder createContainerBuilder(Map environment, String changeDir) {
-
-        if( isShifterEnabled )
-            return createShifterBuilder(environment, changeDir)
-        else
-            return createDockerBuilder(environment, changeDir)
-    }
-
-    @PackageScope
-    ShifterBuilder createShifterBuilder(Map environment, String changeDir) {
-        def builder = new ShifterBuilder(this.containerImage)
-
-        // set up run docker params
-        builder.params(dockerConfig)
-
-        // override the docker entry point the image is NOT defined as executable
-        if( !executable )
-            builder.params(entry: '/bin/bash')
-
-        builder.build()
-        return builder
+                .replace('__KILL_CMD__', killCommand)
+                .replace('__EXIT_CMD__', script.join('\n  '))
     }
 
 
@@ -547,25 +560,48 @@ class BashWrapperBuilder {
      * @return A {@link DockerBuilder} instance
      */
     @PackageScope
-    DockerBuilder createDockerBuilder(Map environment, String changeDir) {
+    ContainerBuilder createContainerBuilder(Map environment, String changeDir) {
 
-        def builder = new DockerBuilder(this.containerImage)
+        final engine = containerConfig.getEngine()
+        ContainerBuilder builder
+
+        /*
+         * create a builder instance given the container engine
+         */
+        if( engine == 'docker' )
+            builder = new DockerBuilder(containerImage)
+        else if( engine == 'singularity' )
+            builder = new SingularityBuilder(containerImage)
+        else if( engine == 'udocker' )
+            builder = new UdockerBuilder(containerImage)
+        else if( engine == 'shifter' )
+            builder = new ShifterBuilder(containerImage)
+        else
+            throw new IllegalArgumentException("Unknown container engine: $engine")
+
+
+        /*
+         * initialise the builder
+         */
         builder.addMountForInputs(inputFiles)
-        builder.addMount(workDir)
+
         if( !executable )
             builder.addMount(binDir)
 
-        if( dockerMount )
-            builder.addMount(dockerMount)
+        if(this.containerMount)
+            builder.addMount(containerMount)
+
+        // task work dir
+        builder.setWorkDir(workDir)
 
         // set the name
         builder.setName('$NXF_BOXID')
 
-        if( dockerMemory )
-            builder.setMemory(dockerMemory)
+        if(this.containerMemory)
+            builder.setMemory(containerMemory)
 
-        if( dockerCpuset )
-            builder.addRunOptions(dockerCpuset)
+        if(this.containerCpuset)
+            builder.addRunOptions(containerCpuset)
 
         // set the environment
         if( environment ) {
@@ -573,7 +609,7 @@ class BashWrapperBuilder {
             builder.addEnv( 'NXF_DEBUG=${NXF_DEBUG:=0}')
 
             // add the user owner variable in order to patch root owned files problem
-            if( dockerConfig.fixOwnership )
+            if( containerConfig.fixOwnership )
                 builder.addEnv( 'NXF_OWNER=$(id -u):$(id -g)' )
 
             if( executable ) {
@@ -588,16 +624,19 @@ class BashWrapperBuilder {
         }
 
         // set up run docker params
-        builder.params(dockerConfig)
+        builder.params(containerConfig)
 
         // extra rule for the 'auto' temp dir temp dir
-        def temp = dockerConfig.temp?.toString()
+        def temp = containerConfig.temp?.toString()
         if( temp == 'auto' || temp == 'true' ) {
             builder.setTemp( changeDir ? '$NXF_SCRATCH' : '$(nxf_mktemp)' )
         }
 
-        if( dockerConfig.containsKey('kill') )
-            builder.params(kill: dockerConfig.kill)
+        if( containerConfig.containsKey('kill') )
+            builder.params(kill: containerConfig.kill)
+
+        if( containerConfig.writableInputMounts==false )
+            builder.params(readOnlyInputs: true)
 
         // override the docker entry point the image is NOT defined as executable
         if( !executable )

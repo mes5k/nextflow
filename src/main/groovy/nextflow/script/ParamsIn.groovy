@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,7 +19,6 @@
  */
 
 package nextflow.script
-
 import groovy.transform.InheritConstructors
 import groovy.transform.PackageScope
 import groovy.transform.ToString
@@ -28,15 +27,15 @@ import groovyx.gpars.dataflow.DataflowBroadcast
 import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.dataflow.DataflowReadChannel
 import groovyx.gpars.dataflow.DataflowVariable
-import groovyx.gpars.dataflow.DataflowWriteChannel
 import groovyx.gpars.dataflow.expression.DataflowExpression
 import nextflow.Nextflow
-import nextflow.extension.DataflowExtensions
+import nextflow.exception.ProcessException
+import nextflow.extension.ToListOp
 import nextflow.processor.ProcessConfig
 /**
  * Base class for input/output parameters
  *
- * @author Paolo DI Tommaso <paolo.ditommaso@gmail.com>
+ * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
 @Slf4j
 abstract class BaseParam {
@@ -147,68 +146,6 @@ abstract class BaseParam {
 
     }
 
-    /**
-     * Creates a channel variable in the script context
-     *
-     * @param channel it can be a string representing a channel variable name in the script context. If
-     *      the variable does not exist it creates a {@code DataflowVariable} in the script with that name.
-     *      If the specified {@code value} is a {@code DataflowWriteChannel} object, use this object
-     *      as the output channel
-     *
-     * @param factory The type of the channel to create, either {@code DataflowVariable} or {@code DataflowQueue}
-     * @return The created (or specified) channel instance
-     */
-    final protected DataflowWriteChannel outputValToChannel( Object channel, Class<DataflowWriteChannel> factory ) {
-
-        if( channel instanceof String ) {
-            // the channel is specified by name
-            def local = channel
-
-            // look for that name in the 'script' context
-            channel = binding.hasVariable(local) ? binding.getVariable(local) : null
-            if( channel instanceof DataflowWriteChannel ) {
-                // that's OK -- nothing to do
-            }
-            else {
-                if( channel == null ) {
-                    log.trace "Creating new output channel > $local"
-                }
-                else {
-                    log.warn "Duplicate output channel name: '$channel' in the script context -- it's worth to rename it to avoid possible conflicts"
-                }
-
-                // instantiate the new channel
-                channel = factory.newInstance()
-
-                // bind it to the script on-fly
-                if( local != '-' && binding) {
-                    // bind the outputs to the script scope
-                    binding.setVariable(local, channel)
-                }
-            }
-        }
-
-        if( channel instanceof DataflowWriteChannel ) {
-            return channel
-        }
-
-        throw new IllegalArgumentException("Invalid output channel reference")
-    }
-
-    @Deprecated
-    final protected resolveName( Map context, String name, boolean strict = true ) {
-        if( context && context.containsKey(name) )
-            return context.get(name)
-
-//        if( binding.hasVariable(name) )
-//            return binding.getVariable(name)
-
-        if( strict )
-            throw new MissingPropertyException(name)
-
-        return name
-    }
-
 }
 
 /**
@@ -228,6 +165,8 @@ interface InParam {
 
     short mapIndex
 
+    def decodeInputs( List values )
+
 }
 
 /**
@@ -242,6 +181,8 @@ abstract class BaseInParam extends BaseParam implements InParam {
     protected fromObject
 
     protected bindObject
+
+    protected owner
 
     /**
      * The channel to which the input value is bound
@@ -268,6 +209,7 @@ abstract class BaseInParam extends BaseParam implements InParam {
         super(binding,holder,ownerIndex)
     }
 
+    abstract String getTypeName()
 
     /**
      * Lazy parameter initializer.
@@ -317,7 +259,7 @@ abstract class BaseInParam extends BaseParam implements InParam {
         if( bindObject instanceof Closure )
             return '__$' + this.toString()
 
-        throw new IllegalArgumentException()
+        throw new IllegalArgumentException("Invalid process input definition")
     }
 
     BaseInParam bind( def obj ) {
@@ -325,7 +267,17 @@ abstract class BaseInParam extends BaseParam implements InParam {
         return this
     }
 
+    private void checkFrom(obj) {
+        if( obj != null ) return
+        def message = 'A process input `from` clause evaluates to null'
+        def name = bindObject instanceof TokenVar ? bindObject.name : null
+        if( name )
+            message += " -- Invalid declaration `${getTypeName()} $name`"
+        throw new IllegalArgumentException(message)
+    }
+
     BaseInParam from( def obj ) {
+        checkFrom(obj)
         fromObject = obj
         return this
     }
@@ -346,7 +298,35 @@ abstract class BaseInParam extends BaseParam implements InParam {
         return this
     }
 
+    def decodeInputs( List inputs ) {
+        final UNDEF = -1 as short
+        def value = inputs[index]
 
+        if( mapIndex == UNDEF || owner instanceof EachInParam )
+            return value
+
+        if( mapIndex != UNDEF ) {
+            def result
+            if( value instanceof Map ) {
+                result = value.values()
+            }
+            else if( value instanceof Collection ) {
+                result = value
+            }
+            else {
+                result = [value]
+            }
+
+            try {
+                return result[mapIndex]
+            }
+            catch( IndexOutOfBoundsException e ) {
+                throw new ProcessException(e)
+            }
+        }
+
+        return value
+    }
 
 }
 
@@ -358,6 +338,8 @@ abstract class BaseInParam extends BaseParam implements InParam {
 class FileInParam extends BaseInParam  {
 
     protected filePattern
+
+    @Override String getTypeName() { 'file' }
 
     /**
      * Define the file name
@@ -438,15 +420,16 @@ class FileInParam extends BaseInParam  {
  */
 @InheritConstructors
 class EnvInParam extends BaseInParam {
-
-
+    @Override String getTypeName() { 'env' }
 }
 
 /**
  *  Represents a process *value* input parameter
  */
 @InheritConstructors
-class ValueInParam extends BaseInParam { }
+class ValueInParam extends BaseInParam {
+    @Override String getTypeName() { 'val' }
+}
 
 /**
  *  Represents a process *stdin* input parameter
@@ -457,6 +440,7 @@ class StdInParam extends BaseInParam {
 
     String getName() { '-' }
 
+    @Override String getTypeName() { 'stdin' }
 }
 
 /**
@@ -466,46 +450,46 @@ class StdInParam extends BaseInParam {
 @Slf4j
 class EachInParam extends BaseInParam {
 
+    @Override String getTypeName() { 'each' }
+
+    private List<InParam> inner = []
+
+    String getName() { '__$'+this.toString() }
+
+    EachInParam bind( def obj ) {
+        def nested = ( obj instanceof TokenFileCall
+                    ? new FileInParam(binding, inner, index).bind(obj.target)
+                    : new ValueInParam(binding, inner, index).bind(obj) )
+        nested.owner = this
+        this.bindObject = nested.bindObject
+        return this
+    }
+
+    InParam getInner() { inner[0] }
+
     @Override
     protected DataflowReadChannel inputValToChannel( value ) {
-
-        def variable = normalizeToVariable( value, name )
+        def variable = normalizeToVariable( value )
         super.inputValToChannel(variable)
     }
 
     @PackageScope
-    static DataflowVariable normalizeToVariable( value, String name = null) {
-        if( value instanceof DataflowReadChannel ) {
-            log.warn "Using queue channel on each parameter declaration should be avoided -- take in consideration to change declaration for each: '$name' parameter"
-            // everything is mapped to a collection
-            value = readValue(value)
+    DataflowReadChannel normalizeToVariable( value ) {
+        def result
+        if( value instanceof DataflowExpression ) {
+            result = value
         }
 
-        if( !(value instanceof Collection) ) {
-            value = [value]
+        else if( value instanceof DataflowReadChannel ) {
+            result = ToListOp.apply(value)
         }
 
-        // the collection is wrapped to a "scalar" dataflow variable
-        Nextflow.variable(value)
-    }
-
-
-    /**
-     * Converts the specified arguments to a {@code List} data type
-     *
-     * @param item
-     * @return
-     */
-    @PackageScope
-    static readValue( DataflowReadChannel channel ) {
-
-        if( channel instanceof DataflowExpression ) {
-            return channel.getVal()
-        }
         else {
-            return DataflowExtensions.toList(channel).getVal()
+            result = new DataflowVariable()
+            result.bind(value)
         }
 
+        return result.chainWith { it instanceof Collection || it == null ? it : [it] }
     }
 
 }
@@ -514,6 +498,8 @@ class EachInParam extends BaseInParam {
 class SetInParam extends BaseInParam {
 
     final List<InParam> inner = []
+
+    @Override String getTypeName() { 'set' }
 
     String getName() { '__$'+this.toString() }
 
@@ -564,9 +550,12 @@ class SetInParam extends BaseInParam {
 
 final class DefaultInParam extends ValueInParam {
 
+    @Override String getTypeName() { 'default' }
+
     DefaultInParam(ProcessConfig config) {
         super(config)
-        from(true)
+        final channel = new DataflowQueue(); channel.bind(Boolean.TRUE)
+        from(channel)
         bind('$')
     }
 }

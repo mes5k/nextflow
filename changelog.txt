@@ -1,6 +1,284 @@
 NEXTFLOW CHANGE-LOG
 ===================
 
+0.25.5 - 4 Aug 2017
+- Fixed NF fails to pull images hosted in the Singularity Hub #414
+- Added `-y` to cloud create command to skip confirmation request
+
+0.25.4 - 31 Jul 2017 
+- Removed invalid debug information 
+
+0.25.3 - 31 Jul 2017 
+- Fixed NPE when parsing AWS price file #408
+- Fixed Grid queue status return wrong data when a process change the submission queue dynamically #412
+- Fixed MPI-like execution for SLURM batch scheduler
+- Fixed NPE when log params key is not defined
+- Fixed Optional parameter for set #399
+- Added automatic pull for Singularity remote images #356
+- Added London and Canada AWS regions
+- Merged Pass NXF_OPTS to JVM during the java version check to allow memory definition on memory-restricted environments #411
+- Improved error message in launcher file
+
+0.25.2 - 3 Jul 2017
+- Fixed Execution hangs if a job submission fail #396
+- Fixed stdout can not be sent into multiple channels #388
+- Fixed Pipeline execution hangs when a process exceed the time limit and retry error strategy is used #387
+- Added scientists and adjectives to run name generator
+- Deprecated `route` operator
+
+0.25.1 - 27 Jun 2017
+- Duplicate mount point docker error #384
+- Disable Docker read-only mounts by default
+
+0.25.0 - 26 Jun 2017 
+- Fixed Dataflow threads pool get exhausted with a large number of tasks #92
+- Fixed Custom function cannot be invoked in the workflow completion handler #374
+- Fixed Runtime errors are not reported in the `workflow.errorMessage` property #369
+- Fixed Warn if params.something is defined twice in a NF script #372
+- Fixed Map.Entry values deserialization process fail #373
+- Fixed List active operators that may hang the script execution #315
+- Fixed launcher error message #366
+- Fixed AWS spot instance bootStorageSize property is ignored #368
+- Fixed Implicit variable `task` is not accessible in cached processes #363
+- Fixed Do not export user environment when submitting job to SGE-like batch scheduler #362
+- Fixed Process termination can throw a ConcurrentModificationException hiding the error cause message #359
+- Fixed GroovyRuntimeException during foreign file copy process #360
+- Fixed Helper function to compare version numbers #319
+- Fixed Docker input file mounts should be read-only for enforce container security #346
+- Fixed Extend `each` repeater syntax to support file collections #355
+- Fixed Modified task properties are not accessible in the command script during task retry #345
+- Fixed PublishDir warning message
+- Fixed Spread operator mishandles Iterable values provided as a dataflow variable #353
+- Fixed UUID cli options are wrongly interpreted as Duration objects #349
+- New toInteger and toLong converter operators
+- New randomSample operator #344
+- New `simpleName` extension method to Path/File objects #354
+- New warning message when input tuple cardinality does not match declared length #348
+- Improved use example into ext directive documentation #327
+- Improved error handing when parsing trace file #371
+- Improved error reporting for process missing input definition
+- Improved launcher script to support https protocol by default #379
+- Change `maxErrors` default to -1
+- Deprecated identifier `channel` as variable name
+
+0.24.4 - 19 May 2017 
+- Fixed PublishDir creates nested directory structures when a folder already exists #342
+- Fixed NoSuchFileException is thrown when trace file path does not exist #334
+- Fixed watchPath glob directory not working #335
+- Fixed Channel.fromFilePairs does not handle properly multiple star wildcards #337
+- Added executor for NQSII, queuing system used on NEC clusters.
+- Added `relative` option to `fromPath` channel factory
+
+0.24.3 - 24 Apr 2017 
+- Fixed Process execution fails with not GNU version of sleep and date tools #321
+- Fixed Pending processes are not cleaned up properly #322
+- Fixed NPE is thrown when Singularity is enabled and a process uses no container #324
+- Fixed Cached processes are not included in the timeline report #325
+- Added MD5 digest file upload
+- Updated docs
+
+0.24.2 - 5 Apr 2017 
+- Fixed Tuple array object deserialisation fails #317
+- Use SLURM squeue —-noheader instead -h command line option to support not standard implementation #316
+- Fixed Execution time is incorrect for the local executor #313
+
+0.24.1 - 24 Mar 2017
+- Fixed Improve explanation of cache DB IOException #303
+- Fixed Operator ifEmpty results in a error when applied to a dataflow variable #308
+- Fixed Process execution fails when the work path contains a parenthesis character #310
+- Fixed Installer script fails when current path contains a blank character #311
+- Fixed Include SLURM partition when checking job status #312
+- Allow the usage of `close` operator on unbounded dataflow variable
+
+0.24.0 - 20 Mar 2017
+- Added new `combine` operator #298
+- Added new `collect` operator #297
+- Added new CLI option `-params-file` to load parameters from a json/yaml file #208
+- Fixed SCM user name is not set accessing private repository #300
+- Fixed Infer singleton process outputs from inputs declaration #301
+- Fixed Use exist status 1 for all NF errors #304
+- Fixed Invalid SGE job name as defined in `sge_types` #299
+- Added `skip` parameter to collectFile operator #306
+- Added experimental `fs` command
+- Improved file staging error reports #295
+- Upgraded Groovy to version 2.4.10
+ 
+0.23.4 - 24 Feb 2017 
+- Fixed Show a warning message when accessing undefined parameters #293
+- Fixed Staging input files in a subfolder changes their names when they are symlinks #292
+- Fixed NPE accessing foreign files 
+- Added column char to list of path escaped chars
+- Fixed Boothook script fails on Ubuntu 16.04
+
+0.23.3 - 9 Feb 2017 
+- Fixed Job termination is not recognised if the starter file is not created #268
+- Fixed Allow NF console to resume process executions (second take) #280
+- Fixed PublishDir may throw a FileAlredyExistsException #283
+- Increased logger file appender buffer size to 64kb
+- Updated Logback to version 1.1.10
+- Updated copyright info
+- Fixed NXF_DEBUG level
+
+0.23.2 - 2 Feb 2017 
+- Improved history lock error message
+- Fixed typo in warning message
+- Added `cleanup` to list of accepted directives
+- Added NXF_OWNER to kubernetes executor
+- Fixed Function nxf_kill is not invoked properly on a containerised process #275
+- Fixed Pending grid jobs are not cancelled upon pipeline interruption
+- Documented that the toSortedList operator can accept a comparator closure #277
+
+0.23.1 - 23 Jan 2017
+- Fixed FixOwnership flag break non BASH scripts/templates #270
+- Fixed Fixed PBS Executor should not have parenthesis #271
+- Fixed Function nxf_kill is not invoked properly on process termination #275
+- Fixed Timeline.html is not working on IE11 #272
+- Fixed Merge process specific extended properties with the ones defined in the default scope #273
+- Fixed Using storeDir and publishDir in the same process yields unexpected results #266
+
+0.23.0 - 13 Dec 2016 
+- Added support for Singularity containers #252
+- Added support for HTTP/S and FTP files (read-only)
+- Fixed stream close leak while copy foreign file to local file system
+- Fixed Task scheduling may hang while checking for job completion #261
+- Fixed Specifying the keyFile cloud config attribute result in an error #263
+- Added support for multiple target channels in `tap` operator #255
+- Added `uri` property to Path and File objects
+- Made NXF_SCRATCH variable accessible to `beforeScript` handler
+
+0.22.6 - 4 Dec 2016 
+- Fixed Script execution terminates before all operators complete #259
+- Fixed A script variable with the same name of a global variable invalidate process resume #254
+- Fixed `when` is not recognised when used before an `input` and `script` is not declared
+- Fixed count operator hung when applied to a dataflow variable
+- Added warning message when an input/output `set` defines only one component #216 #251
+- Reduced log verbosity of Ignite Scheduler classes
+
+0.22.5 - 17 Nov 2016
+- Fixed QueueSize=1 doesn't handle multi-cpu processes #246
+- Fixed Accessing to a not defined script params should raise an error #243
+- Fixed An input channel evaluating to null results in a misleading error message #242
+- Fixed Use of publicDnsName should failover to IP if no name is available #240
+- Fixed Use of yum in cloud boothook may cause problems #239
+- Fixed Execution hang when an operator invokes the `exit` function and no processes have run
+- Fixed fromFilePairs does not match patterns containing curly brackets w/o a star wild character
+- Added `-dump-hashes` command line option to print task key hash keys #211
+- Improved logging 
+
+0.22.4 - 4 Nov 2016 
+- Added `—no-requeue` flag to SLURM job submission 
+- Report log content when a wrapper script execution fail #213
+- Improved error message when cache DB cannot be created
+- Logging error track trace on task re-submit failure
+- Fixed Channel.fromPath throws an exception when the argument is a S3 path
+- Modified `make_temp` so that uses `NXF_TEMP` when defined
+
+0.22.3 - 12 Oct 2016 
+- Fixed PBS qsub fails when the job name is longer than 15 chars #228
+- Fixed Spread operator doesn't connect channels in DAG #231 
+- Fixed amazon prices file format parser
+- Added Cleanup scratch dir upon process completion #230
+- Added `optional` flag to output file declaration
+- Added `region` option to `cloud` command
+- Added Check for missing instance type description 
+
+0.22.2 - 3 Oct 2016 
+- Fixed Copy input files to scratch directory #197
+- Fixed PBS qsub fails when the job name starts with a dot #228
+- Fixed issue when staging-out a symlink output file
+- Fixed log warning when running a script in the console
+
+0.22.1 - 26 Sep 2016 
+- Fixed Nested symlinks are not resolved by Docker container mounts #222
+- Fixed Nextflow execution log fail to get field starting with '%' #223
+- Fixed Nextflow console launcher 
+- Added `ContainerCreation` status to K8S executor
+- Expand `=` to `==` in filter expressions to avoid misleading results
+
+0.22.0 - 19 Sep 2016
+- Fixed queue-size attribute for local executor
+- Fixed Kubernetes pod id parse issue
+- Move `.nextflow.history` and `.cache` files under `.nextflow` directory
+
+0.22.0.RC2 - 12 Sep 2016 
+- Fixed File name containing glob wildcards cannot be captured in the process output #219
+- Fixed Work dir containing glob wildcards are not supported #194
+- Added `revision id` to execution log
+- Added `scriptId`, `scriptFile` and `scriptName` attributes to workflow metadata object 
+- Added time delay penalty on error burst to prevent failing node to drain all pending jobs
+- Load classes without creating an instance of each cloud driver
+- Improved AWS driver missing credentials error report
+- Merged experimental Kubernetes support
+- Improved clean and log command
+- Added EFS default mount path
+- Refactored daemon shutdown
+
+0.22.0.RC1 - 1 Sep 2016 
+- Fixed Implement clean up command #19
+- Fixed Trace file should include cached tasks #114
+- Added ability to log each command run #108
+- Added new `cloud` command 
+- Added AWS EFS support 
+- Added AWS Spot instance error fail-over 
+- Added support cloud auto scaling  
+- Added Ignite job-stealing distributed scheduler 
+
+0.21.3 - 26 Aug 2016 
+- Fixed Spaces in work directory path stops slurm from accepting the job #218
+
+0.21.2 - 12 Aug 2016 
+- Fixed PBS professional batch scheduler submission error #209
+- Fixed Reference to a collection of files is not resolved properly in the output section #214
+- Improved failed and ignored processes reporting
+- Fixed null workflow.projectDir when launching a script file
+- Do no output link file when `followLinks` option is disabled
+
+0.21.1 - 29 July 2016 
+- Fixed NFS work dir is not detected correctly #206 
+- Fixed `splitFasta` operator with the file parameter will not split into single fasta files #181
+- Enable log file for commands when debug or trace option is specified 
+- Added validation checks to `fromPath` and `fromFilePairs` methods
+
+0.21.0 - 20 July 2016
+- Fixed Command line params do not override params defined in the nextflow.config file #202
+
+0.21.0-RC1 - 14 Jul 2016
+- Fixed Ability to customize job name submitted to the scheduler #140
+- Fixed Duplicate output error when no channel specified #182
+- Fixed File paths containing a timestamp are parsed as a Duration object #185
+- Fixed ClosedByInterruptException is thrown randomly #188 
+- Fixed Pipeline hangs when `Channel.from` argument is an empty list #189
+- Fixed Handle customised sbatch returning the jobid by itself #190 
+- Fixed LocalExecutor can randomly hang with no running task #191
+- Fixed Missing flag in SLURM `squeue` call #193
+- Fixed Process script declaring a regexp expression results in a IllegalAccessException #199
+- Merged Silence mkdir error if NXF_HOME not writable #187
+- Refactored ParallelTaskProcessor and TaskProcessor classes to a single class
+- Added `ST` and `BF` queue statuses to SLURM executor
+- Improved logging information
+- Upgrade to Gradle 2.14
+
+0.20.1 - 18 Jun 2016 
+- Fixed Directives do not accept a negative numeric value #180
+- Fixed Dynamic errorStrategy is not evaluated correctly #183
+- Fixed Pipeline hangs when error strategy is used and an upstream process fail
+- Added environment to ContainerBuilder and implement environment export for Shifter containers
+- Updated Groovy runtime to version 2.4.7
+
+0.20.0 - 8 Jun 2016 
+- Added fromFilePairs channel factory method
+- Added `finish` error strategy #158
+- Added ability to change the name and the save path of published files #178
+- Added a syntax validation check for process blocks keywords #177
+- Fixed It's not possible to specify environment modules w/o a version number #174
+- Fixed Local process kill signal is not propagated to children processes #172
+- Fixed scratchDir is overwritten by TMPDIR #171
+- Removed deprecated `Channel.path` methods
+- Ignore missing COUT and CERR variables
+
+0.19.4 - 3 Jun 2016
+- Fixed Exception is thrown while reporting an invalid output declaration #170
+
 0.19.3 - 31 May 2016
 - Fixed Local executor does not run an job when host cpus == 1 #166
 

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -23,6 +23,8 @@ import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.regex.Matcher
+import java.util.regex.Pattern
 
 import com.esotericsoftware.kryo.Kryo
 import com.esotericsoftware.kryo.Serializer
@@ -34,6 +36,8 @@ import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import nextflow.file.FileHelper
 import org.codehaus.groovy.runtime.GStringImpl
+import org.objenesis.instantiator.ObjectInstantiator
+
 /**
  * Helper class to get a {@code Kryo} object ready to be used
  */
@@ -52,6 +56,8 @@ class KryoHelper {
         serializers.put( UUID, UUIDSerializer )
         serializers.put( File, FileSerializer )
         serializers.put( S3Path, PathSerializer )
+        serializers.put( Pattern, PatternSerializer )
+        serializers.put( ArrayTuple, ArrayTupleSerializer )
 
         threadLocal = new ThreadLocal<Kryo>() {
             @Override
@@ -84,6 +90,8 @@ class KryoHelper {
      */
     static private Kryo newInstance() {
         def kryo = new Kryo()
+        kryo.setInstantiatorStrategy( InstantiationStrategy.instance )
+
         // special serializers
         UnmodifiableCollectionsSerializer.registerSerializers(kryo)
 
@@ -104,6 +112,8 @@ class KryoHelper {
         //   has to be registered the base class as default serializer
         //   See Nextflow issues #12
         kryo.addDefaultSerializer(GString, GStringSerializer)
+        // map entry serializer
+        kryo.addDefaultSerializer(Map.Entry, MapEntrySerializer)
 
         return kryo
     }
@@ -192,6 +202,36 @@ class KryoHelper {
 
 }
 
+/**
+ * Kryo throws an IllegalAccessError when deserializing a {@link Matcher} object,
+ * thus implements a custom instantiator object
+ */
+@Singleton
+@CompileStatic
+class MatcherInstantiator implements ObjectInstantiator {
+
+    @Override
+    Object newInstance() {
+        def c = Matcher.getDeclaredConstructor()
+        c.setAccessible(true)
+        c.newInstance()
+    }
+}
+
+@Singleton
+@CompileStatic
+class InstantiationStrategy extends Kryo.DefaultInstantiatorStrategy {
+
+    @Override
+    public ObjectInstantiator newInstantiatorOf (final Class type) {
+        if( type == Matcher ) {
+            MatcherInstantiator.instance
+        }
+        else {
+            super.newInstantiatorOf(type)
+        }
+    }
+}
 
 /**
  * A Kryo serializer to handler a {@code Path} object
@@ -207,8 +247,7 @@ class PathSerializer extends Serializer<Path> {
     void write(Kryo kryo, Output output, Path target) {
         final scheme = target.getFileSystem().provider().getScheme()
         final path = target.toString()
-        if( log.isTraceEnabled() )
-            log.trace "Path serialization > scheme: $scheme; path: $path"
+        log.trace "Path serialization > scheme: $scheme; path: $path"
 
         output.writeString(scheme)
         output.writeString(path)
@@ -218,8 +257,7 @@ class PathSerializer extends Serializer<Path> {
     Path  read(Kryo kryo, Input input, Class<Path> type) {
         final scheme = input.readString()
         final path = input.readString()
-        if( log.isTraceEnabled() )
-            log.trace "Path de-serialization > scheme: $scheme; path: $path"
+        log.trace "Path de-serialization > scheme: $scheme; path: $path"
 
         if( "file".equalsIgnoreCase(scheme) ) {
             return FileSystems.getDefault().getPath(path)
@@ -245,8 +283,7 @@ class GStringSerializer extends Serializer<GString> {
 
     @Override
     void write(Kryo kryo, Output stream, GString object) {
-        if( log.isTraceEnabled() )
-            log.trace "GString serialization: values: ${object?.getValues()} - strings: ${object?.getStrings()}"
+        log.trace "GString serialization: values: ${object?.getValues()} - strings: ${object?.getStrings()}"
         kryo.writeObject( stream, object.getValues() )
         kryo.writeObject( stream, object.getStrings() )
     }
@@ -255,12 +292,10 @@ class GStringSerializer extends Serializer<GString> {
     GString read(Kryo kryo, Input stream, Class<GString> type) {
         Object[] values = kryo.readObject(stream, OBJ_ARRAY_CLASS)
         String[] strings = kryo.readObject(stream, STR_ARRAY_CLASS)
-        if( log.isTraceEnabled() )
-            log.trace "GString de-serialize: values: ${values} - strings: ${strings}"
+        log.trace "GString de-serialize: values: ${values} - strings: ${strings}"
         new GStringImpl(values, strings)
     }
 }
-
 
 
 @Slf4j
@@ -269,15 +304,13 @@ class URLSerializer extends Serializer<URL> {
 
     @Override
     void write(Kryo kryo, Output output, URL url) {
-        if( log.isTraceEnabled() )
-            log.trace "URL serialization > $url"
+        log.trace "URL serialization > $url"
         output.writeString(url.toString())
     }
 
     @Override
     URL read(Kryo kryo, Input input, Class<URL> type) {
-        if( log.isTraceEnabled() )
-            log.trace "URL de-serialization"
+        log.trace "URL de-serialization"
         return new URL(input.readString())
     }
 }
@@ -288,16 +321,14 @@ class UUIDSerializer extends Serializer<UUID> {
 
     @Override
     void write(Kryo kryo, Output output, UUID obj) {
-        if( log.isTraceEnabled() )
-            log.trace "UUID serialization > $obj"
+        log.trace "UUID serialization > $obj"
         output.writeLong( obj.mostSignificantBits )
         output.writeLong( obj.leastSignificantBits )
     }
 
     @Override
     UUID read(Kryo kryo, Input input, Class<UUID> type) {
-        if( log.isTraceEnabled() )
-            log.trace "UUID de-serialization"
+        log.trace "UUID de-serialization"
         long mostBits = input.readLong()
         long leastBits = input.readLong()
         return new UUID(mostBits, leastBits)
@@ -311,17 +342,89 @@ class FileSerializer extends Serializer<File> {
 
     @Override
     void write(Kryo kryo, Output output, File file) {
-        if( log.isTraceEnabled() )
-            log.trace "File serialization > $file"
+        log.trace "File serialization > $file"
         output.writeString(file.toString())
     }
 
     @Override
     File read(Kryo kryo, Input input, Class<File> type) {
-        if( log.isTraceEnabled() )
-            log.trace "File de-serialization"
+        log.trace "File de-serialization"
         return new File(input.readString())
     }
 }
 
 
+/**
+ * The {@link Pattern} class does not have default constructor as required by Kryo,
+ * but implements the {@link Serializable} interface, thus use the default serialization
+ * mechanism to store the pattern as a byte array
+ */
+@CompileStatic
+class PatternSerializer extends Serializer<Pattern> {
+
+    @Override
+    void write(Kryo kryo, Output output, Pattern object) {
+
+        def buffer = new ByteArrayOutputStream()
+        ObjectOutputStream oos = new ObjectOutputStream(buffer)
+        oos.writeObject(object)
+        oos.close()
+
+        def bytes = buffer.toByteArray()
+        output.writeInt(bytes.length)
+        output.write(bytes)
+    }
+
+    @Override
+    Pattern read(Kryo kryo, Input input, Class<Pattern> type) {
+
+        def len = input.readInt()
+        def buffer = new byte[len]
+        input.read(buffer)
+
+        ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(buffer))
+        return (Pattern) ois.readObject()
+
+    }
+}
+
+@CompileStatic
+class ArrayTupleSerializer extends Serializer<ArrayTuple> {
+
+    @Override
+    void write(Kryo kryo, Output output, ArrayTuple tuple) {
+        final len = tuple.size()
+        output.writeInt(len)
+        for( int i=0; i<len; i++ ) {
+            kryo.writeClassAndObject(output, tuple.get(i))
+        }
+    }
+
+    @Override
+    ArrayTuple read(Kryo kryo, Input input, Class<ArrayTuple> type) {
+        final len = input.readInt()
+        def list = new ArrayList(len)
+        for( int i=0; i<len; i++ ) {
+            def item = kryo.readClassAndObject(input)
+            list.add(item)
+        }
+        return new ArrayTuple(list)
+    }
+}
+
+@CompileStatic
+class MapEntrySerializer extends Serializer<Map.Entry> {
+
+    @Override
+    void write(Kryo kryo, Output output, Map.Entry entry) {
+        kryo.writeClassAndObject(output, entry.getKey())
+        kryo.writeClassAndObject(output, entry.getValue())
+    }
+
+    @Override
+    Map.Entry read(Kryo kryo, Input input, Class<Map.Entry> type) {
+        def key = kryo.readClassAndObject(input)
+        def val = kryo.readClassAndObject(input)
+        new MapEntry(key,val)
+    }
+}

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -28,6 +28,7 @@ import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import nextflow.Session
 import nextflow.processor.TaskHandler
+import nextflow.processor.TaskId
 import nextflow.processor.TaskProcessor
 import nextflow.util.Duration
 import org.apache.commons.lang.StringEscapeUtils
@@ -45,7 +46,7 @@ class TimelineObserver implements TraceObserver {
     /**
      * Holds the the start time for tasks started/submitted but not yet completed
      */
-    final private Map<Object,TraceRecord> records = new LinkedHashMap<>()
+    final private Map<TaskId,TraceRecord> records = new LinkedHashMap<>()
 
     /*
      * Holds an unique index color for each process group
@@ -53,6 +54,8 @@ class TimelineObserver implements TraceObserver {
     final private Map<String,Integer> colorIndexes = new ConcurrentHashMap<>()
 
     private Path reportFile
+
+    private long beginMillis
 
     private long startMillis
 
@@ -68,7 +71,7 @@ class TimelineObserver implements TraceObserver {
      */
     @Override
     void onFlowStart(Session session) {
-        startMillis = System.currentTimeMillis()
+        beginMillis = startMillis = System.currentTimeMillis()
     }
 
     /**
@@ -129,11 +132,30 @@ class TimelineObserver implements TraceObserver {
         }
     }
 
+    @Override
+    void onProcessCached(TaskHandler handler) {
+
+        final record = handler.getTraceRecord()
+
+        // remove the record from the current records
+        synchronized (records) {
+            records[ record.taskId ] = record
+        }
+
+        beginMillis = Math.min( beginMillis, record.get('submit') as long )
+    }
+
+
     final private String REPLACE_STR = '/*REPLACE_WITH_TIMELINE_DATA*/'
 
     protected void renderHtml() {
         final tpl = readTemplate()
         final p = tpl.indexOf(REPLACE_STR)
+
+        // make sure the parent path exists
+        def parent = reportFile.getParent()
+        if( parent )
+            Files.createDirectories(parent)
 
         // roll the any trace files that may exist
         reportFile.rollFile()
@@ -148,7 +170,7 @@ class TimelineObserver implements TraceObserver {
     protected StringBuilder renderData() {
         final result = new StringBuilder()
         result << 'var elapsed="' << new Duration(endMillis-startMillis).toString() << '"\n'
-        result << 'var beginningMillis=' << startMillis << ';\n'
+        result << 'var beginningMillis=' << beginMillis << ';\n'
         result << 'var endingMillis=' << endMillis << ';\n'
         result << 'var data=[\n'
         records.values().eachWithIndex { TraceRecord it, index ->
@@ -179,7 +201,8 @@ class TimelineObserver implements TraceObserver {
             if( start && realtime ) {
                 def label = StringEscapeUtils.escapeJavaScript(labelString(record))
                 def ending = start+realtime
-                template << ", {\"starting_time\": $start, \"ending_time\": $ending, \"color\":c2($index), \"label\": \"$label\"}"
+                def clr = record.cached ? 'c0' : 'c2'
+                template << ", {\"starting_time\": $start, \"ending_time\": $ending, \"color\":$clr($index), \"label\": \"$label\"}"
 
                 if( complete && ending < complete ) {
                     template << ", {\"starting_time\": $ending, \"ending_time\": $complete, \"color\":c1($index)}"
@@ -193,14 +216,17 @@ class TimelineObserver implements TraceObserver {
 
     protected String labelString( TraceRecord record ) {
         def result = []
-        def duration = record.get('duration', null)
-        def memory = record.get('vmem', null)
+        def duration = record.getFmtStr('duration')
+        def memory = record.getFmtStr('vmem')
 
         if( duration )
             result << duration.toString()
 
         if( memory )
             result <<  memory.toString()
+
+        if( record.cached )
+            result << 'CACHED'
 
         result.join(' / ')
     }

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -95,12 +95,14 @@ class TaskBodyTest extends Specification {
                 alpha = 1
                 params.beta = 2
                 params.zeta = new Foo()
+                params.gamma = [:]
+                params.hola = 'Ciao'
                 delta = new Foo()
                 x = 'alpha'
 
                 process simpleTask  {
                     input:
-                    val x from 1
+                    val x from 'hola'
 
                     """
                     echo ${alpha}

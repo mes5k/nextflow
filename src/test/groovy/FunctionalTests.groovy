@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -17,7 +17,8 @@
  *   You should have received a copy of the GNU General Public License
  *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
  */
-import nextflow.processor.ParallelTaskProcessor
+
+import nextflow.processor.TaskProcessor
 import nextflow.script.ScriptRunner
 import spock.lang.Shared
 import spock.lang.Specification
@@ -122,7 +123,7 @@ class FunctionalTests extends Specification {
         def processor = runner.scriptObj.taskProcessor
 
         then:
-        processor instanceof ParallelTaskProcessor
+        processor instanceof TaskProcessor
         processor.getName() == 'taskHello'
         processor.config.echo == true
         processor.config.shell == 'zsh'
@@ -133,5 +134,43 @@ class FunctionalTests extends Specification {
 
     }
 
+    def 'test merge ext properties' () {
+        given:
+        def configStr = '''
+            process {
+                ext {
+                    alpha = "aaa"
+                    delta = "ddd"
+                }
+                $foo {
+                    ext {
+                        beta = "BBB"
+                        delta = "DDD"
+                    }
+                }
+            }
+        '''
+        def cfg = new ConfigSlurper().parse(configStr)
+
+        when:
+        def script = '''
+
+            process foo {
+                exec:
+                println true
+            }
+
+            '''
+
+        def runner = new ScriptRunner(cfg)
+        runner.setScript(script).execute()
+        def processor = runner.scriptObj.taskProcessor
+        println processor.config.ext
+        then:
+        processor instanceof TaskProcessor
+        processor.config.ext.alpha == 'aaa'
+        processor.config.ext.beta == 'BBB'
+        processor.config.ext.delta == 'DDD'
+    }
 
 }

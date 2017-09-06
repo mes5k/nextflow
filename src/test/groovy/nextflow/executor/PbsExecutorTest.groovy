@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -26,6 +26,8 @@ import nextflow.processor.TaskConfig
 import nextflow.processor.TaskProcessor
 import nextflow.processor.TaskRun
 import spock.lang.Specification
+import spock.lang.Unroll
+
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -36,8 +38,10 @@ class PbsExecutorTest extends Specification {
 
         given:
         def executor = [:] as PbsExecutor
+        def task = Mock(TaskRun); task.getName() >> 'hello world'
+
         expect:
-        executor.getSubmitCommandLine(Mock(TaskRun), Paths.get('/some/path/script.sh') ) == ['qsub', 'script.sh']
+        executor.getSubmitCommandLine(task, Paths.get('/some/path/script.sh') ) == ['qsub', '-N', 'nf-hello_world', 'script.sh']
 
     }
 
@@ -53,17 +57,16 @@ class PbsExecutorTest extends Specification {
         def task = new TaskRun()
         task.processor = proc
         task.workDir = Paths.get('/work/dir')
-        task.name = 'the task name'
+        task.name = 'task name'
 
         when:
         task.config = new TaskConfig()
         then:
         executor.getHeaders(task) == '''
-                #PBS -d /work/dir
-                #PBS -N nf-the_task_name
+                #PBS -N nf-task_name
                 #PBS -o /work/dir/.command.log
                 #PBS -j oe
-                #PBS -V
+                cd /work/dir
                 '''
                 .stripIndent().leftTrim()
 
@@ -74,13 +77,12 @@ class PbsExecutorTest extends Specification {
         task.config.time = '1m'
         then:
         executor.getHeaders(task) == '''
-                #PBS -d /work/dir
-                #PBS -N nf-the_task_name
+                #PBS -N nf-task_name
                 #PBS -o /work/dir/.command.log
                 #PBS -j oe
-                #PBS -V
                 #PBS -q alpha
                 #PBS -l walltime=00:01:00
+                cd /work/dir
                 '''
                 .stripIndent().leftTrim()
 
@@ -92,14 +94,13 @@ class PbsExecutorTest extends Specification {
         task.config.memory = '1m'
         then:
         executor.getHeaders(task) == '''
-                #PBS -d /work/dir
-                #PBS -N nf-the_task_name
+                #PBS -N nf-task_name
                 #PBS -o /work/dir/.command.log
                 #PBS -j oe
-                #PBS -V
                 #PBS -q alpha
                 #PBS -l walltime=00:01:00
                 #PBS -l mem=1mb
+                cd /work/dir
                 '''
                 .stripIndent().leftTrim()
 
@@ -113,15 +114,14 @@ class PbsExecutorTest extends Specification {
         task.config.cpus = 2
         then:
         executor.getHeaders(task) == '''
-                #PBS -d /work/dir
-                #PBS -N nf-the_task_name
+                #PBS -N nf-task_name
                 #PBS -o /work/dir/.command.log
                 #PBS -j oe
-                #PBS -V
                 #PBS -q delta
                 #PBS -l nodes=1:ppn=2
                 #PBS -l walltime=00:10:00
                 #PBS -l mem=5mb
+                cd /work/dir
                 '''
                 .stripIndent().leftTrim()
 
@@ -133,15 +133,14 @@ class PbsExecutorTest extends Specification {
         task.config.cpus = 8
         then:
         executor.getHeaders(task) == '''
-                #PBS -d /work/dir
-                #PBS -N nf-the_task_name
+                #PBS -N nf-task_name
                 #PBS -o /work/dir/.command.log
                 #PBS -j oe
-                #PBS -V
                 #PBS -q delta
                 #PBS -l nodes=1:ppn=8
                 #PBS -l walltime=24:00:00
                 #PBS -l mem=1gb
+                cd /work/dir
                 '''
                 .stripIndent().leftTrim()
 
@@ -152,19 +151,64 @@ class PbsExecutorTest extends Specification {
         task.config.memory = '2g'
         then:
         executor.getHeaders(task) == '''
-                #PBS -d /work/dir
-                #PBS -N nf-the_task_name
+                #PBS -N nf-task_name
                 #PBS -o /work/dir/.command.log
                 #PBS -j oe
-                #PBS -V
                 #PBS -q delta
                 #PBS -l walltime=54:10:00
                 #PBS -l mem=2gb
+                cd /work/dir
                 '''
                 .stripIndent().leftTrim()
 
     }
 
+    def WorkDirWithBlanks() {
+
+        setup:
+        def executor = Spy(PbsExecutor)
+
+        // mock process
+        def proc = Mock(TaskProcessor)
+
+        // task object
+        def task = new TaskRun()
+        task.processor = proc
+        task.workDir = Paths.get('/work/dir 1')
+        task.name = 'task name'
+
+        when:
+        task.config = new TaskConfig()
+        then:
+        executor.getHeaders(task) == '''
+                #PBS -N nf-task_name
+                #PBS -o "/work/dir\\ 1/.command.log"
+                #PBS -j oe
+                cd "/work/dir\\ 1"
+                '''
+                .stripIndent().leftTrim()
+
+    }
+
+    @Unroll
+    def 'should return valid job name given #name'() {
+        given:
+        def executor = [:] as PbsExecutor
+        def task = Mock(TaskRun)
+        task.getName() >> name
+
+        expect:
+        executor.getJobNameFor(task) == expected
+        executor.getJobNameFor(task).size() <= 15
+
+        where:
+        name        | expected
+        'hello'     | 'nf-hello'
+        '12 45'     | 'nf-12_45'
+        'hello(123)'| 'nf-hello123'
+        'very-long-task-name-taking-more-than-15-chars' | 'nf-very-long-ta'
+
+    }
 
     def testParseJobId() {
 

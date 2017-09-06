@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,6 +19,7 @@
  */
 
 package nextflow.processor
+import java.nio.file.FileSystems
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 
@@ -26,6 +27,14 @@ import com.google.common.hash.HashCode
 import groovy.transform.Memoized
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
+import nextflow.container.ContainerConfig
+import nextflow.container.ContainerScriptTokens
+import nextflow.container.DockerBuilder
+import nextflow.container.ShifterBuilder
+import nextflow.container.SingularityBuilder
+import nextflow.container.SingularityCache
+import nextflow.container.UdockerBuilder
+import nextflow.exception.IllegalConfigException
 import nextflow.exception.ProcessException
 import nextflow.exception.ProcessMissingTemplateException
 import nextflow.exception.ProcessNotRecoverableException
@@ -39,10 +48,6 @@ import nextflow.script.ScriptType
 import nextflow.script.StdInParam
 import nextflow.script.TaskBody
 import nextflow.script.ValueOutParam
-import nextflow.container.ContainerScriptTokens
-import nextflow.container.DockerBuilder
-import nextflow.container.ShifterBuilder
-
 /**
  * Models a task instance
  *
@@ -55,7 +60,7 @@ class TaskRun implements Cloneable {
     /**
      * Task unique id
      */
-    def id
+    TaskId id
 
     /**
      * Task index within its execution group
@@ -65,12 +70,12 @@ class TaskRun implements Cloneable {
     /**
      * Task name
      */
-    def String name
+    String name
 
     /**
      * The unique hash code associated to this task
      */
-    def HashCode hash
+    HashCode hash
 
     /*
      * The processor that creates this 'task'
@@ -88,7 +93,7 @@ class TaskRun implements Cloneable {
     Map<OutParam,Object> outputs = [:]
 
 
-    def void setInput( InParam param, Object value = null ) {
+    void setInput( InParam param, Object value = null ) {
         assert param
 
         inputs[param] = value
@@ -100,7 +105,7 @@ class TaskRun implements Cloneable {
         }
     }
 
-    def void setOutput( OutParam param, Object value = null ) {
+    void setOutput( OutParam param, Object value = null ) {
         assert param
         outputs[param] = value
     }
@@ -136,10 +141,14 @@ class TaskRun implements Cloneable {
      */
     def stderr
 
+    private ContainerConfig containerConfigCache
+
+    private Integer containerConfigHash
+
     /**
      * @return The task produced stdout result as string
      */
-    def String getStdout() {
+    String getStdout() {
 
         if( stdout instanceof Path ) {
             try {
@@ -157,7 +166,7 @@ class TaskRun implements Cloneable {
         return null
     }
 
-    def String getStderr() {
+    String getStderr() {
 
         if( stderr instanceof Path ) {
             try {
@@ -230,6 +239,16 @@ class TaskRun implements Cloneable {
         }
     }
 
+    List<String> dumpLogFile(int n = 50) {
+        try {
+            return dumpObject(workDir.resolve(CMD_LOG),n)
+        }
+        catch( Exception e ) {
+            log.debug "Unable to dump error of process '$name' -- Cause: ${e}"
+            return []
+        }
+    }
+
 
     protected List<String> dumpObject( obj, int max ) {
         List result = null
@@ -286,18 +305,20 @@ class TaskRun implements Cloneable {
     /**
      * The number of times the execution of the task has failed
      */
-    def volatile int failCount
+    volatile int failCount
 
     /**
      * Mark the task as failed
      */
-    def volatile boolean failed
+    volatile boolean failed
 
-    def volatile boolean aborted
+    volatile boolean aborted
 
-    def TaskConfig config
+    TaskConfig config
 
-    def TaskContext context
+    TaskContext context
+
+    TaskProcessor.RunType runType = TaskProcessor.RunType.SUBMIT
 
     TaskRun clone() {
         final taskClone = (TaskRun)super.clone()
@@ -305,6 +326,15 @@ class TaskRun implements Cloneable {
         taskClone.config = config.clone()
         taskClone.config.setContext(taskClone.context)
         return taskClone
+    }
+
+    TaskRun makeCopy() {
+        def copy = this.clone()
+        // -- reset the error condition (if any)
+        copy.id = TaskId.next()
+        copy.error = null
+        copy.exitStatus = Integer.MAX_VALUE
+        return copy
     }
 
     String getName() {
@@ -324,7 +354,7 @@ class TaskRun implements Cloneable {
 
         // fallback on the current task index, however do not set the 'name' attribute
         // so it has a chance to recover the 'sampleId' at next invocation
-        return "$baseName ($index)"
+        return processor.singleton ? baseName : "$baseName ($index)"
     }
 
     String getScript() {
@@ -383,17 +413,12 @@ class TaskRun implements Cloneable {
     }
 
     /**
-     * It is made of two parts:
-     *
-     * 1) Look at the {@code nextflow.script.FileOutParam} which name is the expected
+     * Look at the {@code nextflow.script.FileOutParam} which name is the expected
      *  output name
      *
-     * 2) It looks shared file parameters, that being so are also output parameters
-     *  The problem here is that we need the real file name as it has been staged in
-     *  process execution folder.
      */
     @Memoized
-    def List<String> getOutputFilesNames() {
+    List<String> getOutputFilesNames() {
         def result = []
 
         getOutputsByType(FileOutParam).keySet().each { FileOutParam param ->
@@ -423,7 +448,7 @@ class TaskRun implements Cloneable {
      * @param types One ore more subclass of {@code InParam}
      * @return An associative array containing all the objects for the specified type
      */
-    public <T extends OutParam> Map<T,Object> getOutputsByType( Class<T>... types ) {
+    def <T extends OutParam> Map<T,Object> getOutputsByType( Class<T>... types ) {
         def result = [:]
         outputs.each {
             if( types.contains(it.key.class) ) {
@@ -453,6 +478,11 @@ class TaskRun implements Cloneable {
         config.scratch
     }
 
+    String getWorkDirStr() {
+        if( !workDir ) return null
+        workDir.fileSystem == FileSystems.default ? workDir.toString() : workDir.toUri().toString()
+    }
+
     static final public String CMD_LOG = '.command.log'
     static final public String CMD_ENV = '.command.env'
     static final public String CMD_SCRIPT = '.command.sh'
@@ -463,15 +493,11 @@ class TaskRun implements Cloneable {
     static final public String CMD_START = '.command.begin'
     static final public String CMD_RUN = '.command.run'
     static final public String CMD_STUB = '.command.run.1'
-    static final public String CMD_CONTEXT = '.command.val'
     static final public String CMD_TRACE = '.command.trace'
 
 
-
     String toString( ) {
-
-        "id: $id; name: $name; type: $type; status: $exitStatus; error: $error; workDirectory: $workDir"
-
+        "id: $id; name: $name; type: $type; exit: ${exitStatus==Integer.MAX_VALUE ? '-' : exitStatus}; error: $error; workDir: $workDir"
     }
 
 
@@ -511,25 +537,56 @@ class TaskRun implements Cloneable {
             imageName = config.container as String
         }
 
-        if( getShifterConfig().enabled ) {
-            ShifterBuilder.normalizeImageName(imageName, getShifterConfig())
+        final cfg = getContainerConfig()
+        final engine = cfg.getEngine()
+        if( engine == 'shifter' ) {
+            ShifterBuilder.normalizeImageName(imageName, cfg)
+        }
+        else if( engine == 'udocker' ) {
+            UdockerBuilder.normalizeImageName(imageName)
+        }
+        else if( engine == 'singularity' ) {
+            if( !imageName )
+                return null
+            if( imageName.startsWith('docker://') || imageName.startsWith('shub://'))
+                return new SingularityCache(cfg) .getCachePathFor(imageName) .toString()
+            else
+                return SingularityBuilder.normalizeImageName(imageName)
         }
         else {
-            DockerBuilder.normalizeImageName(imageName, getDockerConfig())
+            DockerBuilder.normalizeImageName(imageName, cfg)
         }
     }
 
-    /**
-     * @return A {@link Map} object holding the configuration attributes for the Docker engine
-     */
-    Map getDockerConfig() {
-        def result = processor.getSession().config?.docker as Map
-        result != null ? result : Collections.emptyMap()
+    ContainerConfig getContainerConfig() {
+
+        if( containerConfigCache != null && containerConfigHash == processor.getSession().config?.hashCode() ) {
+            return containerConfigCache
+        }
+
+        def engines = new LinkedList<Map>()
+        getContainerConfig0('docker', engines)
+        getContainerConfig0('shifter', engines)
+        getContainerConfig0('udocker', engines)
+        getContainerConfig0('singularity', engines)
+
+        def enabled = engines.findAll { it.enabled?.toString() == 'true' }
+        if( enabled.size() > 1 ) {
+            def names = enabled.collect { it.engine }
+            throw new IllegalConfigException("Cannot enable more than one container engine -- Choose either one of: ${names.join(', ')}")
+        }
+
+        containerConfigHash = processor.getSession().config?.hashCode()
+        containerConfigCache = (enabled ? enabled.get(0) : ( engines ? engines.get(0) : [engine:'docker'] )) as ContainerConfig
     }
 
-    Map getShifterConfig() {
-        def result = processor.getSession().config?.shifter as Map
-        result != null ? result : Collections.emptyMap()
+
+    private void getContainerConfig0(String engine, List<Map> drivers) {
+        def config = processor.getSession().config?.get(engine) as Map
+        if( config ) {
+            config.engine = engine
+            drivers << config
+        }
     }
 
     /**
@@ -539,7 +596,8 @@ class TaskRun implements Cloneable {
         if( isContainerExecutable() )
             return true
 
-        return getDockerConfig()?.enabled?.toString() == 'true'
+        def config = getContainerConfig()
+        return config && config.engine == 'docker' && config.enabled
     }
 
     /**

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -61,7 +61,7 @@ class ConcatOp {
         def current = channels[index++]
         def next = index < channels.size() ? channels[index] : null
 
-        DataflowExtensions.subscribeImpl (current, [
+        DataflowHelper.subscribeImpl(current, [
                 onNext: { result.bind(it) },
                 onComplete: {
                     if(next) append(result, channels, index)

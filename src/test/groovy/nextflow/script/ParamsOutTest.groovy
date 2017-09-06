@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,8 +21,11 @@
 package nextflow.script
 import static test.TestParser.parseAndReturnProcess
 
+import java.nio.file.Path
+
 import groovyx.gpars.dataflow.DataflowQueue
 import nextflow.processor.TaskContext
+import nextflow.util.BlankSeparatedList
 import spock.lang.Specification
 /**
  *
@@ -150,11 +153,11 @@ class ParamsOutTest extends Specification {
         out1.getOutChannels().get(0) instanceof DataflowQueue
         out1.getOutChannels().get(1) instanceof DataflowQueue
 
-        out2.name == 'three'
+        out2.name == null
         out2.getOutChannels().size()==1
         out2.getOutChannels().get(0) instanceof DataflowQueue
 
-        out3.name == 'four'
+        out3.name == null
         out3.getOutChannels().size()==3
         out3.getOutChannels().get(0) instanceof DataflowQueue
         out3.getOutChannels().get(1) instanceof DataflowQueue
@@ -196,9 +199,8 @@ class ParamsOutTest extends Specification {
         out1.mode == BasicMode.standard
 
         out2.class == FileOutParam
-        out2.name == 'y'
-        out2.outChannel instanceof DataflowQueue
-        out2.outChannel == binding.y
+        out2.name == null
+        out2.outChannel == null
         out2.mode == BasicMode.flatten
 
         out3.class == FileOutParam
@@ -254,7 +256,7 @@ class ParamsOutTest extends Specification {
         out1.outChannel == binding.channel2
         out1.isDynamic()
 
-        out2.name == 'simple.txt'
+        out2.name == null
         out2.getFilePatterns(ctx,null) == ['simple.txt']
         out2.outChannel instanceof DataflowQueue
         out2.outChannel == binding.channel3
@@ -279,6 +281,37 @@ class ParamsOutTest extends Specification {
         out5.inner[0] instanceof FileOutParam
         (out5.inner[0] as FileOutParam) .getFilePatterns(ctx,null) == ['script_file.txt','hola.fa']
         (out5.inner[0] as FileOutParam) .isDynamic()
+
+    }
+
+    def testFileOutFileCollection () {
+
+        given:
+        def text = '''
+
+            process hola {
+              output:
+              file(x) into channel1
+              set file(y) into channel2
+
+              return ''
+            }
+            '''
+
+        def binding = [:]
+        def process = parseAndReturnProcess(text, binding)
+
+        def list_x = new BlankSeparatedList(['a.txt' as Path, 'b.txt' as Path, 'c.txt' as Path])
+        def list_y = ['one.txt' as Path, 'two.txt' as Path, 'three.txt' as Path]
+        def ctx = [x: list_x, y: list_y]
+
+        when:
+        FileOutParam out0 = process.config.getOutputs().get(0)
+        SetOutParam out1 = process.config.getOutputs().get(1)
+
+        then:
+        out0.getFilePatterns(ctx,null) == ['a.txt', 'b.txt', 'c.txt' ]
+        out1.inner[0].getFilePatterns(ctx,null) == ['one.txt', 'two.txt', 'three.txt']
 
     }
 
@@ -335,9 +368,9 @@ class ParamsOutTest extends Specification {
         out4.getFilePatterns(binding,null) == ['file_v']
         out4.getOutChannels().size()==0
 
-        out5.name == 'w'
+        out5.name == null
         out5.getFilePatterns(binding,null) == ['w']
-        out5.getOutChannels().get(0) == binding.w
+        out4.getOutChannels().size()==0
     }
 
 
@@ -403,6 +436,8 @@ class ParamsOutTest extends Specification {
               file x hidden false into ch
               file x followLinks true into ch
               file x type 'dir' into ch
+              file x glob false into ch
+              file x optional true into ch
 
               return ''
             }
@@ -420,6 +455,8 @@ class ParamsOutTest extends Specification {
         FileOutParam out6 = process.config.getOutputs().get(6)
         FileOutParam out7 = process.config.getOutputs().get(7)
         FileOutParam out8 = process.config.getOutputs().get(8)
+        FileOutParam out9 = process.config.getOutputs().get(9)
+        FileOutParam out10 = process.config.getOutputs().get(10)
 
         then:
         out0.maxDepth == null
@@ -427,6 +464,8 @@ class ParamsOutTest extends Specification {
         out0.followLinks
         out0.type == null
         out0.separatorChar == ':'
+        out0.glob
+        !out0.optional
 
         out1.maxDepth == 5
         out2.hidden
@@ -436,7 +475,46 @@ class ParamsOutTest extends Specification {
         !out6.hidden
         out7.followLinks
         out8.type == 'dir'
+        out9.glob == false
+        out10.optional
 
+    }
+
+    def testFileWithoutInto() {
+        setup:
+        def text = '''
+            process hola {
+              output:
+                file 'x'
+                file y
+                file 'z' into channel_z
+
+              return ''
+            }
+            '''
+
+        def binding = [:]
+        def process = parseAndReturnProcess(text, binding)
+
+        when:
+        FileOutParam out0 = process.config.getOutputs().get(0)
+        FileOutParam out1 = process.config.getOutputs().get(1)
+        FileOutParam out2 = process.config.getOutputs().get(2)
+
+        then:
+        out0.name == null
+        out0.getFilePatterns(binding,null) == ['x']
+        out0.getOutChannels().size()==0
+
+        out1.name == 'y'
+        out1.getFilePatterns(binding,null) == ['y']
+        out1.getOutChannels().get(0) instanceof DataflowQueue
+        out1.getOutChannels().get(0) == binding.y
+
+        out2.name == null
+        out2.getFilePatterns(binding,null) == ['z']
+        out2.getOutChannels().get(0) instanceof DataflowQueue
+        out2.getOutChannels().get(0) == binding.channel_z
     }
 
 
@@ -447,7 +525,7 @@ class ParamsOutTest extends Specification {
             process hola {
               output:
                 set(x) into p
-                set(y,'-', '*.fa') into q mode flatten
+                set(y, '-', '*.fa') into q mode flatten
                 set(stdout, z) into t mode combine
 
               return ''
@@ -482,7 +560,8 @@ class ParamsOutTest extends Specification {
         out2.inner[1].name == '-'
         out2.inner[1].index == 1
         out2.inner[2] instanceof FileOutParam
-        out2.inner[2].name == '*.fa'
+        out2.inner[2].name == null
+        out2.inner[2].filePattern == '*.fa'
         out2.inner[2].index == 1
         out2.inner.size() ==3
         out2.mode == BasicMode.flatten
@@ -542,7 +621,8 @@ class ParamsOutTest extends Specification {
         out1.inner[1].name == '-'
         out1.inner[1].index == 1
         out1.inner[2] instanceof FileOutParam
-        out1.inner[2].name == '*.fa'
+        out1.inner[2].name == null
+        out1.inner[2].filePattern == '*.fa'
         out1.inner[2].index == 1
         out1.inner.size() ==3
         out1.mode == BasicMode.flatten
@@ -662,7 +742,8 @@ class ParamsOutTest extends Specification {
         out0.inner[0].mapIndex == 0
 
         out0.inner[1] instanceof FileOutParam
-        out0.inner[1].name == 'Y'
+        out0.inner[1].name == null
+        out0.inner[1].filePattern == 'Y'
         out0.inner[1].index == 0
         out0.inner[1].mapIndex == 1
 
@@ -675,6 +756,8 @@ class ParamsOutTest extends Specification {
             process hola {
               output:
               stdout into p
+              stdout into (q)
+              stdout into (x,y,z)
 
               return ''
             }
@@ -684,12 +767,18 @@ class ParamsOutTest extends Specification {
         def process = parseAndReturnProcess(text, binding)
 
         when:
-        def out1 = process.config.getOutputs().get(0)
+        def out0 = (StdOutParam)process.config.getOutputs().get(0)
+        def out1 = (StdOutParam)process.config.getOutputs().get(1)
+        def out2 = (StdOutParam)process.config.getOutputs().get(2)
 
         then:
-        process.config.getOutputs().size() == 1
+        process.config.getOutputs().size() == 3
 
-        out1.class == StdOutParam
+        out0.getOutChannels()[0].is binding.p
+        out1.getOutChannels()[0].is binding.q
+        out2.getOutChannels()[0].is binding.x
+        out2.getOutChannels()[1].is binding.y
+        out2.getOutChannels()[2].is binding.z
 
     }
 

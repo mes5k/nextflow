@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,6 +21,7 @@
 package nextflow.extension
 
 import nextflow.Channel
+import nextflow.Session
 import org.junit.Rule
 import test.OutputCapture
 import spock.lang.Specification
@@ -30,6 +31,10 @@ import spock.lang.Specification
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
 class PrintOperatorTest extends Specification{
+
+    def setupSpec() {
+        new Session()
+    }
 
     /*
      * Read more http://mrhaki.blogspot.com.es/2015/02/spocklight-capture-and-assert-system.html

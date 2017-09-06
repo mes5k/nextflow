@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -22,6 +22,8 @@ package nextflow.splitter
 
 import groovyx.gpars.dataflow.operator.PoisonPill
 import spock.lang.Specification
+import test.TestHelper
+
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -66,5 +68,24 @@ class StringSplitterTest extends Specification {
 
     }
 
+    def testSplitStringByOne () {
+
+        expect:
+        new StringSplitter().options(by: 1).target('ABC') .list() == ['A','B','C']
+
+    }
+
+    def testSplitToFile() {
+        given:
+        def folder = TestHelper.createInMemTempDir()
+
+        when:
+        def chunks = new StringSplitter().options(by:4, file: folder).target('Hello world') .list()
+        then:
+        chunks[0].text == 'Hell'
+        chunks[1].text == 'o wo'
+        chunks[2].text == 'rld'
+
+    }
 
 }

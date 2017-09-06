@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -20,7 +20,6 @@
 
 package nextflow.script
 import groovyx.gpars.dataflow.DataflowQueue
-import groovyx.gpars.dataflow.DataflowVariable
 import groovyx.gpars.dataflow.DataflowWriteChannel
 import nextflow.Session
 import nextflow.exception.ProcessNotRecoverableException
@@ -54,7 +53,7 @@ class ScriptRunnerTest extends Specification {
 
         // when no outputs are specified, the 'stdout' is the default output
         then:
-        runner.result instanceof DataflowVariable
+        runner.result instanceof DataflowQueue
         runner.result.val == "echo Hello world"
 
     }
@@ -609,5 +608,52 @@ class ScriptRunnerTest extends Specification {
     static Map cfg(String config) {
         new ConfigSlurper().parse(config).toMap()
     }
+
+
+    def 'should define directive with a negative value' () {
+
+        when:
+        def script = '''
+            X = 10
+            process taskHello {
+                maxRetries -1
+                maxErrors -X
+                ''
+            }
+            '''
+        def runner = new ScriptRunner([executor:'nope'])
+        runner.setScript(script).execute()
+        def processor = runner.scriptObj.taskProcessor
+
+        then:
+        processor.config.maxRetries == -1
+        processor.config.maxErrors == -10
+
+    }
+
+
+    def 'should not thrown duplicate channel exception' () {
+
+        when:
+        def script = '''
+
+            process foo {
+              output: file '*.pdf'
+              'touch x.pdf'
+            }
+
+            process bar {
+              output: file '*.pdf'
+              'touch x.pdf'
+            }
+                        '''
+        def runner = new ScriptRunner([executor:'nope'])
+        runner.setScript(script).execute()
+
+        then:
+        noExceptionThrown()
+
+    }
+
 
 }

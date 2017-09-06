@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -45,6 +45,37 @@ class BlankSeparatedListTest extends Specification {
         x[0] == 'a'
         x[1] == 'b'
         x[2] == 'c'
+    }
+
+    def 'should collect items' () {
+
+        given:
+        def p = new BlankSeparatedList('x'..'z')
+        expect:
+        p.collect() == ['x','y','z']
+
+    }
+
+    def 'should convert to a list' () {
+        given:
+        def p = new BlankSeparatedList('x'..'z')
+        expect:
+        p as List == ['x','y','z']
+        p as Set == ['x','y','z'] as Set
+    }
+
+    def 'should join items' () {
+        given:
+        def p = new BlankSeparatedList('x'..'z')
+        expect:
+        p.join('-') == 'x-y-z'
+    }
+
+    def 'should get first item' () {
+        given:
+        def p = new BlankSeparatedList('x'..'z')
+        expect:
+        p.first() == 'x'
     }
 
 }

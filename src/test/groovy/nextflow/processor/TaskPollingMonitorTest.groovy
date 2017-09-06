@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,8 +19,7 @@
  */
 
 package nextflow.processor
-
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.ArrayBlockingQueue
 
 import nextflow.Session
 import nextflow.util.Duration
@@ -47,7 +46,7 @@ class TaskPollingMonitorTest extends Specification {
         monitor.pollIntervalMillis == Duration.of('1h').toMillis()
         monitor.capacity == 11
         monitor.dumpInterval ==  Duration.of('3h')
-        monitor.pollingQueue instanceof ConcurrentLinkedQueue
+        monitor.runningQueue instanceof ArrayBlockingQueue
 
     }
 

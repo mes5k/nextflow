@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -23,6 +23,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 
 import nextflow.util.ArrayTuple
+import spock.lang.Requires
 import spock.lang.Specification
 /**
  *
@@ -30,6 +31,11 @@ import spock.lang.Specification
  */
 class NextflowTest extends Specification {
 
+    @Requires({ System.getenv('CI_GROOVY_VERSION') })
+    def 'should match CI groovy version'() {
+        expect:
+        System.getenv('CI_GROOVY_VERSION') == GroovySystem.getVersion()
+    }
 
     def testFile() {
 
@@ -145,6 +151,7 @@ class NextflowTest extends Specification {
 
         folder.resolve('file1.txt').text = 'file 1'
         folder.resolve('file2.fa').text = 'file 2'
+        Files.createSymbolicLink( folder.resolve('file_link.fa'), folder.resolve('file2.fa'))
         folder.resolve('dir1').mkdir()
         folder.resolve('dir1').resolve('file3.txt').text = 'file 3'
         folder.resolve('dir1').resolve('dir2').mkdirs()
@@ -154,7 +161,7 @@ class NextflowTest extends Specification {
         when:
         def result = Nextflow.files("$folder/**.fa", relative: true)
         then:
-        result.collect { it.toString() } .sort() == ['dir1/dir2/file4.fa', 'dir_link/dir2/file4.fa', 'file2.fa']
+        result.collect { it.toString() } .sort() == ['dir1/dir2/file4.fa', 'dir_link/dir2/file4.fa', 'file2.fa', 'file_link.fa']
 
         when:
         result = Nextflow.files("$folder/**.fa", relative: true, followLinks: false)
@@ -164,7 +171,7 @@ class NextflowTest extends Specification {
         when:
         result = Nextflow.files("$folder/**.fa", relative: true, maxDepth: 1)
         then:
-        result.collect { it.toString() } .sort() == ['file2.fa']
+        result.collect { it.toString() } .sort() == ['file2.fa', 'file_link.fa']
 
         when:
         result = Nextflow.files("$folder/**", relative: true, type:'file')
@@ -174,7 +181,8 @@ class NextflowTest extends Specification {
                                                      'dir_link/dir2/file4.fa',
                                                      'dir_link/file3.txt',
                                                      'file1.txt',
-                                                     'file2.fa']
+                                                     'file2.fa',
+                                                     'file_link.fa']
 
         when:
         result = Nextflow.files("$folder/**", relative: true, type:'file', followLinks: false)
@@ -229,6 +237,51 @@ class NextflowTest extends Specification {
         Nextflow.tuple(1,2,3) == new ArrayTuple([1,2,3])
         Nextflow.tuple([4,5,6]) == new ArrayTuple([4,5,6])
         Nextflow.tuple([4,5,6], [1,2]) == new ArrayTuple([[4,5,6], [1,2]])
+    }
+
+
+    def 'should match file with glob pattern' () {
+
+        given:
+        def root = Files.createTempDirectory('test')
+        def file1 = root.resolve('file-*.txt')
+        def file2 = root.resolve('file-?.txt')
+        def file3 = root.resolve('file[a-b].txt')
+        def file4 = root.resolve('file{a,b}.txt')
+        def filea = root.resolve('filea.txt')
+        def fileb = root.resolve('fileb.txt')
+
+        when:
+        file3.text = 'Hello'
+        file4.text = 'World'
+        file1.text = 'Star'
+        file2.text = 'Mark'
+        filea.text = 'aaa'
+        fileb.text = 'bbb'
+
+        then:
+        file1.exists()
+        file2.exists()
+        file3.exists()
+        file4.exists()
+        filea.exists()
+        fileb.exists()
+        file1.name == 'file-*.txt'
+        file2.name == 'file-?.txt'
+        file3.name == 'file[a-b].txt'
+        file4.name == 'file{a,b}.txt'
+
+        expect:
+        Nextflow.file(root.resolve('file-\\*.txt')) == file1
+        Nextflow.file(root.resolve('file-\\?.txt')) == file2
+        Nextflow.file(root.resolve('file-*')) *. name .sort() == ['file-*.txt', 'file-?.txt']
+        Nextflow.file(root.resolve('file[a-b].*')) *. name .sort() == ['filea.txt', 'fileb.txt']
+
+        Nextflow.file(root.resolve('file-*.txt'), glob: false) == file1
+        Nextflow.file("$root/file-*.txt", glob: false) == file1
+
+        cleanup:
+        root?.deleteDir()
     }
 
 

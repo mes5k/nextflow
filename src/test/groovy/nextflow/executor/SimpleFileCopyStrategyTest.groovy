@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -100,23 +100,41 @@ class SimpleFileCopyStrategyTest extends Specification {
         strategy.normalizeGlobStarPaths(['file1.txt','path/file2.txt','path/**/file3.txt', 'path/**/file4.txt','**/fa']) == ['file1.txt','path/file2.txt','path','*']
     }
 
+
     @Unroll
-    def 'should return a valid `cp` command' () {
+    def 'should return a valid stage-in command' () {
 
         given:
         def strategy = [:] as SimpleFileCopyStrategy
         expect:
-        strategy.copyCommand(source, target) == result
+        strategy.stageInCommand(source, target, mode) == result
+
+        where:
+        source                      | target            | mode      | result
+        'some/path/to/file.txt'     | 'file.txt'        | null      | 'ln -s some/path/to/file.txt file.txt'
+        "some/path/to/file'3.txt"   | 'file\'3.txt'     | null      | "ln -s some/path/to/file\\'3.txt file\\'3.txt"
+        'some/path/to/file.txt'     | 'file.txt'        | 'link'    | 'ln some/path/to/file.txt file.txt'
+        '/some/path/to/file.txt'    | 'file.txt'        | 'copy'    | 'cp -fRL /some/path/to/file.txt file.txt'
+        '/some/path/to/file.txt'    | 'here/to/abc.txt' | 'copy'    | 'cp -fRL /some/path/to/file.txt here/to/abc.txt'
+    }
+
+    @Unroll
+    def 'should return a valid stage-out command' () {
+
+        given:
+        def strategy = [:] as SimpleFileCopyStrategy
+        expect:
+        strategy.stageOutCommand(source, target) == result
 
         where:
         source              | target    | result
-        'file.txt'          | '/to/dir' | "cp -fR file.txt /to/dir"
-        "file'3.txt"        | '/to dir' | "cp -fR file\\'3.txt /to\\ dir"
-        'path_name'         | '/to/dir' | "cp -fR path_name /to/dir"
-        'input/file.txt'    | '/to/dir' | "mkdir -p /to/dir/input && cp -fR input/file.txt /to/dir/input"
-        'long/path/name'    | '/to/dir' | "mkdir -p /to/dir/long/path && cp -fR long/path/name /to/dir/long/path"
-        'path_name/*'       | '/to/dir' | "mkdir -p /to/dir/path_name && cp -fR path_name/* /to/dir/path_name"
-        'path_name/'        | '/to/dir' | "mkdir -p /to/dir/path_name && cp -fR path_name/ /to/dir/path_name"
+        'file.txt'          | '/to/dir' | "cp -fRL file.txt /to/dir"
+        "file'3.txt"        | '/to dir' | "cp -fRL file\\'3.txt /to\\ dir"
+        'path_name'         | '/to/dir' | "cp -fRL path_name /to/dir"
+        'input/file.txt'    | '/to/dir' | "mkdir -p /to/dir/input && cp -fRL input/file.txt /to/dir/input"
+        'long/path/name'    | '/to/dir' | "mkdir -p /to/dir/long/path && cp -fRL long/path/name /to/dir/long/path"
+        'path_name/*'       | '/to/dir' | "mkdir -p /to/dir/path_name && cp -fRL path_name/* /to/dir/path_name"
+        'path_name/'        | '/to/dir' | "mkdir -p /to/dir/path_name && cp -fRL path_name/ /to/dir/path_name"
 
     }
 
@@ -125,7 +143,7 @@ class SimpleFileCopyStrategyTest extends Specification {
         given:
         def strategy = [:] as SimpleFileCopyStrategy
         expect:
-        strategy.copyCommand(source, target, 'move') == result
+        strategy.stageOutCommand(source, target, 'move') == result
 
         where:
         source              | target    | result
@@ -144,7 +162,7 @@ class SimpleFileCopyStrategyTest extends Specification {
         given:
         def strategy = [:] as SimpleFileCopyStrategy
         expect:
-        strategy.copyCommand(source, target, 'rsync') == result
+        strategy.stageOutCommand(source, target, 'rsync') == result
 
         where:
         source              | target    | result
@@ -158,6 +176,51 @@ class SimpleFileCopyStrategyTest extends Specification {
 
     }
 
+
+    def 'should return stage-in script' () {
+
+        given:
+        def task = new TaskBean(
+            inputFiles: ['hello.txt': Paths.get('/some/file.txt'), 'dir/to/file.txt': Paths.get('/other/file.txt')]
+        )
+
+        when:
+        def strategy = new SimpleFileCopyStrategy(task)
+        def script = strategy.getStageInputFilesScript()
+        then:
+        script == '''
+                rm -f hello.txt
+                rm -f dir/to/file.txt
+                ln -s /some/file.txt hello.txt
+                mkdir -p dir/to && ln -s /other/file.txt dir/to/file.txt
+                '''
+                .stripIndent().leftTrim()
+
+    }
+
+    def 'should return stage-in script with copy' () {
+
+        given:
+        def task = new TaskBean(
+                inputFiles: ['hello.txt': Paths.get('/some/file.txt'), 'dir/to/file.txt': Paths.get('/other/file.txt')],
+                stageInMode: 'copy'
+        )
+
+        when:
+        def strategy = new SimpleFileCopyStrategy(task)
+        def script = strategy.getStageInputFilesScript()
+        then:
+        script == '''
+                rm -f hello.txt
+                rm -f dir/to/file.txt
+                cp -fRL /some/file.txt hello.txt
+                mkdir -p dir/to && cp -fRL /other/file.txt dir/to/file.txt
+                '''
+                .stripIndent().leftTrim()
+
+    }
+
+
     def 'should return cp script to unstage output files' () {
 
         given:
@@ -169,8 +232,8 @@ class SimpleFileCopyStrategyTest extends Specification {
         then:
         script == '''
                 mkdir -p /target/work\\ dir
-                cp -fR simple.txt /target/work\\ dir || true
-                mkdir -p /target/work\\ dir/my/path && cp -fR my/path/file.bam /target/work\\ dir/my/path || true
+                cp -fRL simple.txt /target/work\\ dir || true
+                mkdir -p /target/work\\ dir/my/path && cp -fRL my/path/file.bam /target/work\\ dir/my/path || true
                 '''
                 .stripIndent().rightTrim()
 
@@ -179,7 +242,7 @@ class SimpleFileCopyStrategyTest extends Specification {
     def 'should return rsync script to unstage output files' () {
 
         given:
-        def task = new TaskBean( outputFiles: [ 'simple.txt', 'my/path/file.bam' ], targetDir: Paths.get("/target/work's"), unstageStrategy: 'rsync')
+        def task = new TaskBean( outputFiles: [ 'simple.txt', 'my/path/file.bam' ], targetDir: Paths.get("/target/work's"), stageOutMode: 'rsync')
 
         when:
         def strategy = new SimpleFileCopyStrategy(task)

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -42,6 +42,7 @@ import ch.qos.logback.core.rolling.FixedWindowRollingPolicy
 import ch.qos.logback.core.rolling.RollingFileAppender
 import ch.qos.logback.core.rolling.TriggeringPolicyBase
 import ch.qos.logback.core.spi.FilterReply
+import ch.qos.logback.core.util.FileSize
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import nextflow.Global
@@ -61,6 +62,8 @@ import org.slf4j.LoggerFactory
  */
 @CompileStatic
 class LoggerHelper {
+
+    static private String STARTUP_ERROR = 'startup failed:\n'
 
     static private String logFileName
 
@@ -223,6 +226,7 @@ class LoggerHelper {
             result.file = logFileName
             result.encoder = createEncoder()
             result.setContext(loggerContext)
+            result.bufferSize = FileSize.valueOf('64KB')
             result.start()
         }
 
@@ -269,10 +273,14 @@ class LoggerHelper {
      */
     static class ConsoleLoggerFilter extends Filter<ILoggingEvent> {
 
-        Set<Map.Entry<String,Level>> packages
+        private final Map<String,Level> allLevels
+        private final Set<String> packages
+        private final int len
 
-        ConsoleLoggerFilter( Map<String,Level> packages )  {
-            this.packages = packages.entrySet()
+        ConsoleLoggerFilter( Map<String,Level> levels )  {
+            this.allLevels = levels
+            this.packages = levels.keySet()
+            this.len = packages.size()
         }
 
         @Override
@@ -284,8 +292,9 @@ class LoggerHelper {
 
             def logger = event.getLoggerName()
             def level = event.getLevel()
-            for( Map.Entry<String,Level> entry : packages ) {
-                if ( logger.startsWith( entry.key ) && level.isGreaterOrEqual(Level.INFO) && level.isGreaterOrEqual(entry.value) ) {
+            for( int i=0; i<len; i++ ) {
+                final key=packages[i]
+                if ( logger.startsWith(key) && level.isGreaterOrEqual(Level.INFO) && level.isGreaterOrEqual(allLevels[key]) ) {
                     return FilterReply.NEUTRAL
                 }
             }
@@ -350,6 +359,9 @@ class LoggerHelper {
         else if( fail instanceof NoSuchFileException ) {
             buffer.append("No such file: ${normalize(fail.message)}")
         }
+        else if( message && message.startsWith(STARTUP_ERROR))  {
+            buffer.append(formatStartupErrorMessage(message))
+        }
         else if( message && !message.startsWith('@') ) {
             buffer.append(normalize(message))
         }
@@ -374,6 +386,11 @@ class LoggerHelper {
 
     }
 
+    @PackageScope
+    static String formatStartupErrorMessage( String message ) {
+        message.replace(STARTUP_ERROR,'').replaceFirst(/^_nf_script_[a-z0-9]+: *[0-9]+: */,'')
+    }
+
     static String getDetailMessage(Throwable error) {
         try {
             def clazz = error.class
@@ -384,7 +401,6 @@ class LoggerHelper {
             return field.get(error)
         }
         catch( Throwable e ) {
-            //
             return null
         }
     }

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -195,28 +195,6 @@ class SortFileCollector extends FileCollector implements Closeable {
 
 
     /**
-     * Normalize values to a {@link InputStream}
-     *
-     * @param value The user provided value
-     * @return An {@link InputStream} referring the value
-     */
-    protected InputStream normalizeToStream( value ) {
-        if( value instanceof Path )
-            return value.newInputStream()
-
-        if( value instanceof File )
-            return value.newInputStream()
-
-        if( value instanceof CharSequence )
-            return new FastByteArrayInputStream(value.toString().getBytes())
-
-        if( value instanceof byte[] )
-            return new FastByteArrayInputStream(value as byte[])
-
-        throw new IllegalArgumentException("Not a valid file collector argument [${value.class.name}]: $value")
-    }
-
-    /**
      * Append a user value to the file collection
      *
      * @param key The grouping key
@@ -282,7 +260,7 @@ class SortFileCollector extends FileCollector implements Closeable {
             return null
 
         Hasher hasher = cacheable ? CacheHelper.hasher( hashKeys, CacheHelper.HashMode.STANDARD ) : null
-        if( hasher && log.isTraceEnabled() ) {
+        if( hasher ) {
             log.trace "  hasher: ${CacheHelper.hasher( hashKeys, CacheHelper.HashMode.STANDARD ) } \n"
         }
 
@@ -307,9 +285,7 @@ class SortFileCollector extends FileCollector implements Closeable {
 
             if( hasher ) {
                 hasher = CacheHelper.hasher(hasher, entry.hash, CacheHelper.HashMode.STANDARD)
-                if( log.isTraceEnabled() ) {
-                    log.trace "  index: $entry.index - ${CacheHelper.hasher(entry.hash).hash()} \n"
-                }
+                log.trace "  index: $entry.index - ${CacheHelper.hasher(entry.hash).hash()} \n"
             }
 
         }

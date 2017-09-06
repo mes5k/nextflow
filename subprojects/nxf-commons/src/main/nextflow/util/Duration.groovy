@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,7 +19,7 @@
  */
 
 package nextflow.util
-import java.util.concurrent.ConcurrentHashMap
+
 import java.util.concurrent.TimeUnit
 
 import groovy.transform.CompileStatic
@@ -34,11 +34,11 @@ import org.apache.commons.lang.time.DurationFormatUtils
 @Slf4j
 @CompileStatic
 @EqualsAndHashCode(includes = 'durationInMillis')
-class Duration implements Comparable<Duration>, Serializable {
+class Duration implements Comparable<Duration>, Serializable, Cloneable {
 
-    static private final FORMAT = ~/^(\d+)\s*([a-zA-Z]+)/
+    static private final FORMAT = ~/^(\d+\.?\d*)\s*([a-zA-Z]+)/
 
-    static private final LEGACY = ~/(\d{1,2}):(\d{1,2}):(\d{1,2})/
+    static private final LEGACY = ~/^(\d{1,2}):(\d{1,2}):(\d{1,2})$/
 
     static private final List<String> MILLIS = ['ms','milli','millis']
 
@@ -116,7 +116,7 @@ class Duration implements Comparable<Duration>, Serializable {
     /**
      * Parse a duration string in legacy format i.e. hh:mm:ss
      *
-     * @param str The string to be parsed e.g. {@code 05:10:30} (5 hours, 10 mins, 30 seconds)
+     * @param str The string to be parsed e.g. {@code 05:10:30} (5 hours, 10 min, 30 seconds)
      * @return The duration in millisecond
      */
     private long parseLegacy( String str ) {
@@ -149,13 +149,12 @@ class Duration implements Comparable<Duration>, Serializable {
                 def digit = groups[1]
                 def unit = groups[2]
 
-                result += convert( digit.toInteger(), unit )
+                result += convert( digit.toFloat(), unit )
                 str = str.substring(all.length()).trim()
                 continue
             }
 
-
-            if( i == 0 )
+            if( i == 0 || str )
                 throw new IllegalArgumentException("Not a valid duration value: ${str}")
             break
         }
@@ -170,22 +169,22 @@ class Duration implements Comparable<Duration>, Serializable {
      * @param unit A valid duration unit e.g. {@code d}, {@code d}, {@code h}, {@code hour}, etc
      * @return The duration in millisecond
      */
-    private long convert( int digit, String unit ) {
+    private long convert( float digit, String unit ) {
 
         if( unit in MILLIS ) {
-            return digit
+            return Math.round(digit)
         }
         if ( unit in SECONDS ) {
-            return TimeUnit.SECONDS.toMillis(digit)
+            return Math.round(digit * 1_000)
         }
         if ( unit in MINUTES ) {
-            return TimeUnit.MINUTES.toMillis(digit)
+            return Math.round(digit * 60 * 1_000)
         }
         if ( unit in HOURS ) {
-            return TimeUnit.HOURS.toMillis(digit)
+            return Math.round(digit * 60 * 60 * 1_000)
         }
         if ( unit in DAYS ) {
-            return TimeUnit.DAYS.toMillis(digit)
+            return Math.round(digit * 24 * 60 * 60 * 1_000)
         }
 
         throw new IllegalStateException()
@@ -219,20 +218,40 @@ class Duration implements Comparable<Duration>, Serializable {
         durationInMillis
     }
 
+    long getMillis() {
+        durationInMillis
+    }
+
     long toSeconds() {
         TimeUnit.MILLISECONDS.toSeconds(durationInMillis)
+    }
+
+    long getSeconds() {
+        toSeconds()
     }
 
     long toMinutes() {
         TimeUnit.MILLISECONDS.toMinutes(durationInMillis)
     }
 
+    long getMinutes() {
+        toMinutes()
+    }
+
     long toHours() {
         TimeUnit.MILLISECONDS.toHours(durationInMillis)
     }
 
+    long getHours() {
+        toHours()
+    }
+
     long toDays() {
         TimeUnit.MILLISECONDS.toDays(durationInMillis)
+    }
+
+    long getDays() {
+        toDays()
     }
 
     /**
@@ -305,63 +324,21 @@ class Duration implements Comparable<Duration>, Serializable {
     }
 
     def multiply( Number value ) {
-        return new Duration( durationInMillis * value )
+        return new Duration( (long)(durationInMillis * value) )
     }
 
     def div( Number value ) {
         return new Duration( Math.round((double)(durationInMillis / value)) )
     }
 
+    boolean asBoolean() {
+        return durationInMillis != 0
+    }
+
 
     @Override
     int compareTo(Duration that) {
         return this.durationInMillis <=> that.durationInMillis
-    }
-
-    @EqualsAndHashCode
-    static class ThrottleObj {
-        Object result
-        long timestamp
-
-        ThrottleObj() {}
-
-        ThrottleObj( value, long timestamp ) {
-            this.result = value
-            this.timestamp = timestamp
-        }
-    }
-
-    def throttle( Closure closure ) {
-        throttle0( durationInMillis, null, closure)
-    }
-
-    def throttle( seed, Closure closure ) {
-        def initialValue = new ThrottleObj( seed, System.currentTimeMillis() )
-        throttle0( durationInMillis, initialValue, closure)
-    }
-
-    static final Map<Integer,ThrottleObj> throttleMap = new ConcurrentHashMap<>()
-
-    private static throttle0( long delayMillis, ThrottleObj initialValue, Closure closure ) {
-        assert closure != null
-
-        def key = 17
-        key  = 31 * key + closure.class.hashCode()
-        key  = 31 * key + closure.owner.hashCode()
-        key  = 31 * key + closure.delegate?.hashCode() ?: 0
-
-        ThrottleObj obj = throttleMap.get(key)
-        if( obj == null ) {
-            obj = initialValue ?: new ThrottleObj()
-            throttleMap.put(key,obj)
-        }
-
-        if( System.currentTimeMillis() - obj.timestamp > delayMillis ) {
-            obj.timestamp = System.currentTimeMillis()
-            obj.result = closure.call()
-        }
-
-        obj.result
     }
 
 }

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,15 +19,18 @@
  */
 
 package nextflow.daemon
+import static nextflow.Const.ROLE_WORKER
 
 import groovy.util.logging.Slf4j
-import nextflow.executor.ServiceName
 import nextflow.file.FileHelper
 import nextflow.file.igfs.IgFileSystemProvider
 import nextflow.file.igfs.IgPath
+import nextflow.scheduler.SchedulerAgent
 import nextflow.util.KryoHelper
 import nextflow.util.PathSerializer
-import org.apache.ignite.Ignite
+import nextflow.util.ServiceName
+import sun.misc.Signal
+import sun.misc.SignalHandler
 
 /**
  * Launch the Ignite daemon
@@ -38,8 +41,6 @@ import org.apache.ignite.Ignite
 @Slf4j
 @ServiceName('ignite')
 class IgDaemon implements DaemonLauncher {
-
-    Ignite grid
 
     @Override
     void launch(Map config) {
@@ -53,13 +54,25 @@ class IgDaemon implements DaemonLauncher {
         /*
          * Launch grid instance
          */
-        grid = new IgGridFactory(IgGridFactory.ROLE_WORKER, config).start()
+        def factory = new IgGridFactory(ROLE_WORKER, config)
+        final grid = factory.start()
 
         /*
          * configure the file system
          */
         log.debug "Configuring Apache Ignite file system"
         FileHelper.getOrCreateFileSystemFor(IgFileSystemProvider.SCHEME, [grid: grid])
+
+        /*
+         * Scheduler agent
+         */
+        final agent = new SchedulerAgent(grid, factory.clusterConfig).run()
+
+        final handler = { log.info "System terminated -- Stopping daemon.."; agent.close(true) } as SignalHandler
+        Signal.handle(new Signal("INT"), handler);
+        Signal.handle(new Signal("TERM"), handler);
+        Signal.handle(new Signal("HUP"), handler);
+
     }
 
 

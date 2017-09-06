@@ -1,3 +1,23 @@
+/*
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ *
+ *   This file is part of 'Nextflow'.
+ *
+ *   Nextflow is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   Nextflow is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package nextflow.processor
 import java.lang.management.ManagementFactory
 
@@ -82,14 +102,16 @@ class LocalPollingMonitor extends TaskPollingMonitor {
 
         final int cpus = configCpus(session,name)
         final long memory = configMem(session,name)
+        final int size = session.getQueueSize(name, OS.getAvailableProcessors())
 
-        log.debug "Creating local task monitor for executor '$name' > cpus: $cpus; memory: ${new MemoryUnit(memory)}; pollInterval: $pollInterval; dumpInterval: $dumpInterval"
+        log.debug "Creating local task monitor for executor '$name' > cpus=$cpus; memory=${new MemoryUnit(memory)}; capacity=$size; pollInterval=$pollInterval; dumpInterval=$dumpInterval"
 
         new LocalPollingMonitor(
                 name: name,
                 cpus: cpus,
                 memory: memory,
                 session: session,
+                capacity: size,
                 pollInterval: pollInterval,
                 dumpInterval: dumpInterval,
         )
@@ -97,7 +119,12 @@ class LocalPollingMonitor extends TaskPollingMonitor {
 
     @PackageScope
     static int configCpus(Session session, String name) {
-        session.getExecConfigProp(name, 'cpus', OS.getAvailableProcessors()) as int
+        int cpus = session.getExecConfigProp(name, 'cpus', 0) as int
+
+        if( !cpus )
+            cpus = OS.getAvailableProcessors()
+
+        return cpus
     }
 
     @PackageScope
@@ -142,6 +169,7 @@ class LocalPollingMonitor extends TaskPollingMonitor {
      */
     @Override
     protected boolean canSubmit(TaskHandler handler) {
+
         final taskCpus = cpus(handler)
         if( taskCpus>maxCpus )
             throw new ProcessNotRecoverableException("Process requirement exceed available CPUs -- req: $taskCpus; avail: $maxCpus")
@@ -150,7 +178,7 @@ class LocalPollingMonitor extends TaskPollingMonitor {
         if( taskMemory>maxMemory)
             throw new ProcessNotRecoverableException("Process requirement exceed available memory -- req: ${new MemoryUnit(taskMemory)}; avail: ${new MemoryUnit(maxMemory)}")
 
-        final result = taskCpus <= availCpus && taskMemory <= availMemory
+        final result = super.canSubmit(handler) && taskCpus <= availCpus && taskMemory <= availMemory
         if( !result && log.isTraceEnabled( ) ) {
             log.trace "Task `${handler.task.name}` cannot be scheduled -- taskCpus: $taskCpus <= availCpus: $availCpus && taskMemory: ${new MemoryUnit(taskMemory)} <= availMemory: ${new MemoryUnit(availMemory)}"
         }

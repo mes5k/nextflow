@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -26,8 +26,11 @@ import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import nextflow.processor.TaskMonitor
 import nextflow.processor.TaskPollingMonitor
+import nextflow.processor.TaskProcessor
 import nextflow.processor.TaskRun
 import nextflow.util.Duration
+import nextflow.util.Escape
+import nextflow.util.Throttle
 import org.apache.commons.lang.StringUtils
 /**
  * Generic task processor executing a task through a grid facility
@@ -39,6 +42,8 @@ import org.apache.commons.lang.StringUtils
 abstract class AbstractGridExecutor extends Executor {
 
     protected Duration queueInterval
+
+    private final static List<String> INVALID_NAME_CHARS = [ " ", "/", ":", "@", "*", "?", "\\n", "\\t", "\\r" ]
 
     /**
      * Initialize the executor class
@@ -54,7 +59,7 @@ abstract class AbstractGridExecutor extends Executor {
      * @return
      */
     def TaskMonitor createTaskMonitor() {
-        return TaskPollingMonitor.create(session, name, 100, Duration.of('1 sec'))
+        return TaskPollingMonitor.create(session, name, 100, Duration.of('5 sec'))
     }
 
     /*
@@ -132,15 +137,43 @@ abstract class AbstractGridExecutor extends Executor {
      * @return A string that represent to submit job name
      */
     protected String getJobNameFor(TaskRun task) {
-        final BLANK = ' ' as char
-        final COLON = ':' as char
+
+        // -- check for a custom `jobName` defined in the nextflow config file
+        def customName = resolveCustomJobName(task)
+        if( customName )
+            return customName
+
+        // -- if not available fallback on the custom naming strategy
+
         final result = new StringBuilder("nf-")
         final name = task.getName()
         for( int i=0; i<name.size(); i++ ) {
-            def ch = name.charAt(i)
-            result.append( ch == BLANK || ch == COLON ? '_' : ch )
+            final ch = name[i]
+            result.append( INVALID_NAME_CHARS.contains(ch) ? "_" : ch )
         }
         result.toString()
+    }
+
+    /**
+     * Resolve the `jobName` property defined in the nextflow config file
+     *
+     * @param task
+     * @return
+     */
+    @PackageScope
+    String resolveCustomJobName(TaskRun task) {
+        try {
+            def custom = (Closure)session?.getExecConfigProp(name, 'jobName', null)
+            if( !custom )
+                return null
+
+            def ctx = [ (TaskProcessor.TASK_CONTEXT_PROPERTY_NAME): task.config ]
+            custom.cloneWith(ctx).call()?.toString()
+        }
+        catch( Exception e ) {
+            log.debug "Unable to resolve job custom name", e
+            return null
+        }
     }
 
     /**
@@ -170,16 +203,32 @@ abstract class AbstractGridExecutor extends Executor {
      * @param jobId The ID of the job to kill
      */
     void killTask( def jobId )  {
-        new ProcessBuilder(killTaskCommand(jobId)).start()
+        def cmd = killTaskCommand(jobId)
+        def proc = new ProcessBuilder(cmd).redirectErrorStream(true).start()
+        proc.waitForOrKill(10_000)
+        def ret = proc.exitValue()
+        if( ret==0 )
+            return
+
+        def m = """\
+                Unable to killing pending jobs
+                - cmd executed: ${cmd.join(' ')}
+                - exit status : $ret
+                - output      :
+                """
+                .stripIndent()
+        m += proc.text.indent('  ')
+        log.debug(m)
     }
 
     /**
      * The command to be used to kill a grid job
+     *
      * @param jobId The job ID to be kill
      * @return The command line to be used to kill the specified job
      */
     protected List<String> killTaskCommand(def jobId) {
-        final result = [ getKillCommand() ]
+        final result = getKillCommand()
         if( jobId instanceof Collection ) {
             jobId.each { result.add(it.toString()) }
             log.trace "Kill command: ${result}"
@@ -190,7 +239,12 @@ abstract class AbstractGridExecutor extends Executor {
         return result
     }
 
-    protected abstract String getKillCommand()
+    /**
+     * The command to be used to kill a grid job
+     *
+     * @return The command line to be used to kill the specified job
+     */
+    protected abstract List<String> getKillCommand()
 
     /**
      * Status as returned by the grid engine
@@ -200,37 +254,40 @@ abstract class AbstractGridExecutor extends Executor {
     /**
      * @return The status for all the scheduled and running jobs
      */
-    Map<?,QueueStatus> getQueueStatus(queue) {
+    Map<String,QueueStatus> getQueueStatus(queue) {
 
         List cmd = queueStatusCommand(queue)
         if( !cmd ) return null
 
         try {
-            if(log.isTraceEnabled())
-            log.trace "Getting grid queue status: ${cmd.join(' ')}"
+            log.trace "[${name.toUpperCase()}] getting queue ${queue?"($queue) ":''}status > cmd: ${cmd.join(' ')}"
 
             def process = new ProcessBuilder(cmd).start()
             def result = process.text
             process.waitForOrKill( 10 * 1000 )
             def exit = process.exitValue()
 
-            if(log.isTraceEnabled())
-            log.trace "${name.toUpperCase()} status result > exit: $exit\n$result\n"
+            log.trace "[${name.toUpperCase()}] queue ${queue?"($queue) ":''}status > cmd exit: $exit\n$result"
 
             return ( exit == 0 ) ? parseQueueStatus( result ) : null
 
         }
         catch( Exception e ) {
-            log.warn "Unable to fetch queue status -- See the log file for details", e
+            log.warn "[${name.toUpperCase()}] failed to retrieve queue ${queue?"($queue) ":''}status -- See the log file for details", e
             return null
         }
 
     }
 
     @PackageScope
-    String dumpQueueStatus() {
+    String dumpQueueStatus(Map<String,QueueStatus> statusMap) {
+        if( statusMap == null )
+            return '  (null)'
+        if( statusMap.isEmpty() )
+            return '  (empty)'
+
         def result = new StringBuilder()
-        fQueueStatus?.each { k, v ->
+        statusMap?.each { k, v ->
             result << '  job: ' << StringUtils.leftPad(k?.toString(),6) << ': ' << v?.toString() << '\n'
         }
         return result.toString()
@@ -247,12 +304,7 @@ abstract class AbstractGridExecutor extends Executor {
      * @param text
      * @return
      */
-    protected abstract Map<?,QueueStatus> parseQueueStatus( String text )
-
-    /**
-     * Store jobs status
-     */
-    protected Map<Object,QueueStatus> fQueueStatus = null
+    protected abstract Map<String,QueueStatus> parseQueueStatus( String text )
 
     /**
      * Verify that a job in a 'active' state i.e. RUNNING or HOLD
@@ -262,21 +314,34 @@ abstract class AbstractGridExecutor extends Executor {
      *  to retrieve the job status for some
      */
     public boolean checkActiveStatus( jobId, queue ) {
+        assert jobId
 
         // -- fetch the queue status
-        fQueueStatus = (Map<Object,QueueStatus>)queueInterval.throttle(null) { getQueueStatus(queue) }
-        if( fQueueStatus == null ) // no data is returned, so return true
+        Map<String,QueueStatus>status = Throttle.cache(queue, queueInterval) {
+            final result = getQueueStatus(queue)
+            log.trace "[${name.toUpperCase()}] queue ${queue?"($queue) ":''}status >\n" + dumpQueueStatus(result)
+            return result
+        }
+
+        if( status == null ) { // no data is returned, so return true
             return true
+        }
 
-        if( !fQueueStatus.containsKey(jobId) )
+        if( !status.containsKey(jobId) ) {
+            log.trace "[${name.toUpperCase()}] queue ${queue?"($queue) ":''}status > map does not contain jobId: `$jobId`"
             return false
+        }
 
-        return fQueueStatus[jobId] == QueueStatus.RUNNING || fQueueStatus[jobId] == QueueStatus.HOLD
-
+        final result = status[jobId.toString()] == QueueStatus.RUNNING || status[jobId.toString()] == QueueStatus.HOLD
+        log.trace "[${name.toUpperCase()}] queue ${queue?"($queue) ":''}status > jobId `$jobId` active status: $result"
+        return result
     }
 
     protected String wrapHeader( String str ) { str }
 
-
+    protected String quote(Path path) {
+        def str = Escape.path(path)
+        path.toString() != str ? "\"$str\"" : str
+    }
 }
 

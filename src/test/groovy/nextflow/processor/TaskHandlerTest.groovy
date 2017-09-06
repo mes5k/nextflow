@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -44,7 +44,7 @@ class TaskHandlerTest extends Specification {
         def folder = TestHelper.createInMemTempDir()
         folder.resolve( TaskRun.CMD_TRACE ).text = traceText
 
-        def task = new TaskRun(id: 100, workDir: folder, name:'task1', exitStatus: 127, config: [tag: 'seq_x', container: 'ubuntu']  )
+        def task = new TaskRun(id: new TaskId(100), workDir: folder, name:'task1', exitStatus: 127, config: [tag: 'seq_x', container: 'ubuntu']  )
         task.metaClass.getHashLog = { "5d5d7ds" }
         task.processor = Mock(TaskProcessor)
         task.processor.getSession() >> new Session()
@@ -84,12 +84,12 @@ class TaskHandlerTest extends Specification {
         trace.write_bytes == 30
 
         // check get method
-        trace.get('%cpu', null) == '1.0%'
-        trace.get('%mem', null) == '2.0%'
-        trace.get('rss', null ) == '1.2 MB'
-        trace.get('vmem', null ) == '10.8 MB'
-        trace.get('peak_rss', null ) == '2.2 MB'
-        trace.get('peak_vmem', null ) == '20.6 MB'
+        trace.getFmtStr('%cpu') == '1.0%'
+        trace.getFmtStr('%mem') == '2.0%'
+        trace.getFmtStr('rss') == '1.2 MB'
+        trace.getFmtStr('vmem') == '10.8 MB'
+        trace.getFmtStr('peak_rss') == '2.2 MB'
+        trace.getFmtStr('peak_vmem') == '20.6 MB'
 
         when:
         handler = [:] as TaskHandler

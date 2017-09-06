@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -54,5 +54,20 @@ class RepositoryProviderTest extends Specification {
         provider = RepositoryProvider.create(new ProviderConfig('local', [path:'/user/data']),'local/w')
         then:
         provider.endpointUrl == 'file:/user/data/w'
+    }
+
+    def 'should set credentials' () {
+
+        given:
+        def config = Mock(ProviderConfig)
+        def provider = Spy(RepositoryProvider)
+        provider.config = config
+
+        when:
+        provider.setCredentials('pditommaso', 'secret1')
+        then:
+        1 * config.setUser('pditommaso')
+        1 * config.setPassword('secret1')
+
     }
 }

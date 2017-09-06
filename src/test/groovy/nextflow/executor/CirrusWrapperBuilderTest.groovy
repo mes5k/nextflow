@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -75,7 +75,7 @@ class CirrusWrapperBuilderTest extends Specification {
                 # NEXTFLOW TASK: Hello 1
                 set -e
                 set -u
-                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 2 ]] && set -x
+                NXF_DEBUG=\${NXF_DEBUG:=0}; [[ \$NXF_DEBUG > 1 ]] && set -x
 
                 nxf_env() {
                     echo '============= task environment ============='
@@ -97,16 +97,20 @@ class CirrusWrapperBuilderTest extends Specification {
                     walk \$1
                 }
 
-                function nxf_mktemp() {
+                nxf_mktemp() {
                     local base=\${1:-/tmp}
-                    [[ \$(uname) = Darwin ]] && mktemp -d \$base/nxf.XXXXXXXXXX || mktemp -d -t nxf.XXXXXXXXXX -p \$base
+                    if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
+                    else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
+                    fi
                 }
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
                   printf \$exit_status > .exitcode && es3 -q -v 0 --no-stats sync .exitcode s3:/${folder} || true
-                  rm -f "\$COUT" || true
-                  rm -f "\$CERR" || true
+                  set +u
+                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
+                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  rm -rf \$NXF_SCRATCH || true
                   exit \$exit_status
                 }
 
@@ -118,6 +122,7 @@ class CirrusWrapperBuilderTest extends Specification {
                 trap on_exit EXIT
                 trap on_term TERM INT USR1 USR2
 
+                NXF_SCRATCH="\$(set +u; nxf_mktemp \$TMPDIR)"
                 [[ \$NXF_DEBUG > 0 ]] && nxf_env
                 # fetch scripts
                 es3 test s3:/${folder}/.command.env && es3 cat s3:/${folder}/.command.env > .command.env
@@ -127,7 +132,7 @@ class CirrusWrapperBuilderTest extends Specification {
 
                 es3 touch s3:/${folder}/.command.begin
                 [ -f .command.env ] && source .command.env
-                NXF_SCRATCH="\$(set +u; nxf_mktemp \$TMPDIR)" && cd \$NXF_SCRATCH
+                [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
 
                 set +e
                 COUT=\$PWD/.command.po; mkfifo "\$COUT"

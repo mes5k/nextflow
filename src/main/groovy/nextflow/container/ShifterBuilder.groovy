@@ -1,10 +1,35 @@
-package nextflow.container
+/*
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ *
+ *   This file is part of 'Nextflow'.
+ *
+ *   Nextflow is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   Nextflow is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
+package nextflow.container
+import java.nio.file.Path
+
+import nextflow.util.Escape
 /**
+ * Wrap a task execution in a Shifter container
+ *
+ * See https://github.com/NERSC/shifter
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
-class ShifterBuilder implements ContainerBuilder {
+class ShifterBuilder extends ContainerBuilder {
 
     static private String SHIFTER_HELPERS = '''
         function shifter_img() {
@@ -17,11 +42,11 @@ class ShifterBuilder implements ContainerBuilder {
           local image=$1
           local STATUS=$(shifter_img lookup $image)
           if [[ $STATUS != READY && $STATUS != '' ]]; then
-           STATUS=$(shifter_img pull $image)
-           while [[ $STATUS != READY && $STATUS != FAILURE && $STATUS != '' ]]; do
-             sleep 5
-             STATUS=$(shifter_img pull $image)
-           done
+            STATUS=$(shifter_img pull $image)
+            while [[ $STATUS != READY && $STATUS != FAILURE && $STATUS != '' ]]; do
+              sleep 5
+              STATUS=$(shifter_img pull $image)
+            done
           fi
 
           [[ $STATUS == FAILURE || $STATUS == '' ]] && echo "Shifter failed to pull image \\`$image\\`" >&2  && exit 1
@@ -30,8 +55,6 @@ class ShifterBuilder implements ContainerBuilder {
 
 
     private String entryPoint
-
-    private String image
 
     private boolean verbose
 
@@ -42,11 +65,16 @@ class ShifterBuilder implements ContainerBuilder {
         this.image = image
     }
 
+    @Override
     String getRunCommand() { runCommand }
 
     @Override
-    String build(StringBuilder result) {
+    ShifterBuilder build(StringBuilder result) {
         assert image
+
+        for( def entry : env ) {
+            result << makeEnv(entry) << ' '
+        }
 
         result << 'shifter '
 
@@ -59,6 +87,7 @@ class ShifterBuilder implements ContainerBuilder {
             result << ' ' << entryPoint
 
         runCommand = result.toString()
+        return this
     }
 
     ShifterBuilder params( Map params ) {
@@ -80,6 +109,7 @@ class ShifterBuilder implements ContainerBuilder {
     StringBuilder appendRunCommand( StringBuilder wrapper ) {
         wrapper << 'shifter_pull ' << image << '\n'
         wrapper << runCommand
+        return wrapper
     }
 
     /**
@@ -106,5 +136,37 @@ class ShifterBuilder implements ContainerBuilder {
         }
 
         return !imageName.startsWith("docker:") ? "docker:$imageName" : "$imageName:latest"
+    }
+
+    /**
+     * Get the env command line option for the give environment definition
+     *
+     * @param env
+     * @param result
+     * @return
+     */
+    protected CharSequence makeEnv( env, StringBuilder result = new StringBuilder() ) {
+        // append the environment configuration
+        if( env instanceof File ) {
+            env = env.toPath()
+        }
+        if( env instanceof Path ) {
+            result << 'BASH_ENV="' << Escape.path(env) << '"'
+        }
+        else if( env instanceof Map ) {
+            short index = 0
+            for( Map.Entry entry : env.entrySet() ) {
+                if( index++ ) result << ' '
+                result << ("${entry.key}=${entry.value}")
+            }
+        }
+        else if( env instanceof String && env.contains('=') ) {
+            result << env
+        }
+        else if( env ) {
+            throw new IllegalArgumentException("Not a valid environment value: $env [${env.class.name}]")
+        }
+
+        return result
     }
 }

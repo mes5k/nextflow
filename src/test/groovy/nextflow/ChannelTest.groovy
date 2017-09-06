@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,18 +19,16 @@
  */
 
 package nextflow
-import static java.nio.file.StandardWatchEventKinds.ENTRY_CREATE
-import static java.nio.file.StandardWatchEventKinds.ENTRY_DELETE
-import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY
 
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
+import groovyx.gpars.dataflow.DataflowQueue
 import org.junit.Rule
 import spock.lang.Specification
 import test.TemporaryPath
-
+import test.TestHelper
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -41,6 +39,35 @@ class ChannelTest extends Specification {
         new Session()
     }
 
+    def testFrom() {
+        given:
+        DataflowQueue result
+
+        when:
+        result = Channel.from('hola')
+        then:
+        result.val == 'hola'
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.from('alpha','delta')
+        then:
+        result.val == 'alpha'
+        result.val == 'delta'
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.from(['alpha','delta'])
+        then:
+        result.val == 'alpha'
+        result.val == 'delta'
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.from([])
+        then:
+        result.val == Channel.STOP
+    }
 
     def testSingleFile() {
 
@@ -169,21 +196,34 @@ class ChannelTest extends Specification {
 
     }
 
+    def testEscapeGlob() {
 
-
-    def testStringEvents() {
+        setup:
+        def folder = tempDir.root
+        def file1 = Files.createFile(folder.resolve('file1.txt'))
+        def file2 = Files.createFile(folder.resolve('file*.txt'))
+        def file3 = Files.createFile(folder.resolve('file?.txt'))
+        def sub1 = Files.createDirectories(folder.resolve('sub[a-b]'))
+        def file5 = Files.createFile(sub1.resolve('file5.log'))
+        def file6 = Files.createFile(sub1.resolve('file6.txt'))
 
         when:
-        Channel.stringToWatchEvents('xxx')
+        def result = Channel.fromPath("$folder/file\\*.txt").toSortedList().getVal()
         then:
-        thrown(IllegalArgumentException)
+        result == [file2]
 
-        expect:
-        Channel.stringToWatchEvents() == [ ENTRY_CREATE ]
-        Channel.stringToWatchEvents('create,delete') == [ENTRY_CREATE, ENTRY_DELETE]
-        Channel.stringToWatchEvents('Create , MODIFY ') == [ENTRY_CREATE, ENTRY_MODIFY]
+        when:
+        result = Channel.fromPath("$folder/file*.txt", glob: false).toSortedList().getVal()
+        then:
+        result == [file2]
+
+        when:
+        result = Channel.fromPath("$folder/sub\\[a-b\\]/file*").toSortedList().getVal()
+        then:
+        result == [file5,file6]
 
     }
+
 
     def testFromPath() {
 
@@ -264,6 +304,14 @@ class ChannelTest extends Specification {
     }
 
 
+    def testFromPathS3() {
+
+        when:
+        Channel.fromPath('s3://bucket/some/data.txt')
+        then:
+        noExceptionThrown()
+    }
+
     def testFromPathWithLinks() {
 
         setup:
@@ -317,5 +365,123 @@ class ChannelTest extends Specification {
 
     }
 
+
+    def 'should return files prefix' () {
+
+        expect:
+        Channel.readPrefix(Paths.get('/some/path/abc1.fa'), '*1.fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1.fa'), '*1.fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1.fa'), '*_1.fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1.fa'), '*_{1,2}.fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1.fa'), '*_[1-2].fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1.fa'), '**_{1,2}.*') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1_trimmed.fa'), '*_[1-2]_*.fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1_trimmed.fa'), '*??_[1-2]_*.fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1.fa'), 'abc_{1,2}.fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/abc_1.fa'), 'abc_[1-9].fa') == 'abc'
+        Channel.readPrefix(Paths.get('/some/path/foo_abc_1.fa'), 'foo_*_{1,2}.fa') == 'foo_abc'
+    }
+
+    def 'should group files with the same prefix' () {
+
+        setup:
+        def folder = TestHelper.createInMemTempDir()
+        def a1 = Files.createFile(folder.resolve('alpha_1.fa'))
+        def a2 = Files.createFile(folder.resolve('alpha_2.fa'))
+        def b1 = Files.createFile(folder.resolve('beta_1.fa'))
+        def b2 = Files.createFile(folder.resolve('beta_2.fa'))
+        def d1 = Files.createFile(folder.resolve('delta_1.fa'))
+        def d2 = Files.createFile(folder.resolve('delta_2.fa'))
+
+        when:
+        def pairs = Channel.fromFilePairs(folder.resolve("*_{1,2}.*"))
+        then:
+        pairs.val == ['alpha', [a1, a2]]
+        pairs.val == ['beta', [b1, b2]]
+        pairs.val == ['delta', [d1, d2]]
+        pairs.val == Channel.STOP
+
+        when:
+        pairs = Channel.fromFilePairs(folder.resolve("*_{1,2}.fa") , flat: true)
+        then:
+        pairs.val == ['alpha', a1, a2]
+        pairs.val == ['beta', b1, b2]
+        pairs.val == ['delta', d1, d2]
+        pairs.val == Channel.STOP
+    }
+
+    def 'should group files with the same prefix and setting size' () {
+
+        setup:
+        def folder = TestHelper.createInMemTempDir()
+        def a1 = Files.createFile(folder.resolve('alpha_1.fa'))
+        def a2 = Files.createFile(folder.resolve('alpha_2.fa'))
+        def a3 = Files.createFile(folder.resolve('alpha_3.fa'))
+
+        def b1 = Files.createFile(folder.resolve('beta_1.fa'))
+        def b2 = Files.createFile(folder.resolve('beta_2.fa'))
+        def b3 = Files.createFile(folder.resolve('beta_3.fa'))
+
+        def d1 = Files.createFile(folder.resolve('delta_1.fa'))
+        def d2 = Files.createFile(folder.resolve('delta_2.fa'))
+        def d3 = Files.createFile(folder.resolve('delta_3.fa'))
+        def d4 = Files.createFile(folder.resolve('delta_4.fa'))
+
+        when:
+        // default size == 2
+        def pairs = Channel.fromFilePairs(folder.resolve("*_{1,2,3}.fa"))
+        then:
+        pairs.val == ['alpha', [a1, a2]]
+        pairs.val == ['beta', [b1, b2]]
+        pairs.val == ['delta', [d1, d2]]
+        pairs.val == Channel.STOP
+
+        when:
+        pairs = Channel.fromFilePairs(folder.resolve("*_{1,2,3,4}.fa"), size: 3)
+        then:
+        pairs.val == ['alpha', [a1, a2, a3]]
+        pairs.val == ['beta', [b1, b2, b3]]
+        pairs.val == ['delta', [d1, d2, d3]]
+        pairs.val == Channel.STOP
+
+        when:
+        pairs = Channel.fromFilePairs(folder.resolve("*_{1,2,3,4}.fa"), size: -1)
+        then:
+        pairs.val == ['alpha', [a1, a2, a3]]
+        pairs.val == ['beta', [b1, b2, b3]]
+        pairs.val == ['delta', [d1, d2, d3, d4]]
+        pairs.val == Channel.STOP
+
+    }
+
+    def 'should watch and emit a file' () {
+        given:
+        def folder = Files.createTempDirectory('test')
+
+        when:
+        def result = Channel.watchPath("$folder/")
+        sleep 500
+        Files.createFile(folder.resolve('hello.txt'))
+        then:
+        result.val == folder.resolve('hello.txt')
+
+        when:
+        result = Channel.watchPath(folder.toString())
+        sleep 500
+        Files.createFile(folder.resolve('ciao.txt'))
+        then:
+        result.val == folder.resolve('ciao.txt')
+
+        cleanup:
+        folder?.deleteDir()
+    }
+
+    def 'should return an empty channel when watching a missing path' () {
+
+        when:
+        def result = Channel.watchPath("foo/*")
+        then:
+        result.val == Channel.STOP
+    }
 
 }

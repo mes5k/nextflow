@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -36,15 +36,18 @@ import org.codehaus.groovy.ast.ClassNode
 import org.codehaus.groovy.ast.Parameter
 import org.codehaus.groovy.ast.VariableScope
 import org.codehaus.groovy.ast.expr.ArgumentListExpression
+import org.codehaus.groovy.ast.expr.BinaryExpression
 import org.codehaus.groovy.ast.expr.ClosureExpression
 import org.codehaus.groovy.ast.expr.ConstantExpression
 import org.codehaus.groovy.ast.expr.ConstructorCallExpression
+import org.codehaus.groovy.ast.expr.DeclarationExpression
 import org.codehaus.groovy.ast.expr.Expression
 import org.codehaus.groovy.ast.expr.GStringExpression
 import org.codehaus.groovy.ast.expr.MapExpression
 import org.codehaus.groovy.ast.expr.MethodCallExpression
 import org.codehaus.groovy.ast.expr.PropertyExpression
 import org.codehaus.groovy.ast.expr.TupleExpression
+import org.codehaus.groovy.ast.expr.UnaryMinusExpression
 import org.codehaus.groovy.ast.expr.VariableExpression
 import org.codehaus.groovy.ast.stmt.BlockStatement
 import org.codehaus.groovy.ast.stmt.ExpressionStatement
@@ -53,6 +56,7 @@ import org.codehaus.groovy.ast.stmt.Statement
 import org.codehaus.groovy.control.CompilePhase
 import org.codehaus.groovy.control.SourceUnit
 import org.codehaus.groovy.syntax.SyntaxException
+import org.codehaus.groovy.syntax.Types
 import org.codehaus.groovy.transform.ASTTransformation
 import org.codehaus.groovy.transform.GroovyASTTransformation
 /**
@@ -160,7 +164,7 @@ public class NextflowDSLImpl implements ASTTransformation {
         if( isClosure ) {
             // the block holding all the statements defined in the process (closure) definition
             def block = (lastArg as ClosureExpression).code as BlockStatement
-            def len = block.statements.size()
+            int len = block.statements.size()
 
             makeGStringLazyVisitor = new GStringToLazyVisitor(unit)
 
@@ -223,8 +227,15 @@ public class NextflowDSLImpl implements ASTTransformation {
                         break
 
                     default:
-                        fixLazyGString(stm)
+                        if(currentLabel) {
+                            def line = stm.getLineNumber()
+                            def coln = stm.getColumnNumber()
+                            unit.addError(new SyntaxException("Invalid process block definition -- Unknown keyword `$currentLabel`",line,coln))
+                            return
+                        }
 
+                        fixLazyGString(stm)
+                        fixDirectiveWithNegativeValue(stm)  // Fixes #180
                 }
             }
 
@@ -257,7 +268,7 @@ public class NextflowDSLImpl implements ASTTransformation {
             /*
              * when the last statement is a string script, the 'script:' label can be omitted
              */
-            else if( len && !whenStatements ) {
+            else if( len ) {
                 def stm = block.getStatements().get(len-1)
                 readSource(stm,source,unit)
 
@@ -306,7 +317,7 @@ public class NextflowDSLImpl implements ASTTransformation {
 
         // creates a method call expression for the method `when`
         def method = new MethodCallExpression(VariableExpression.THIS_EXPRESSION, 'when', whenObj)
-        parent.addStatement( new ExpressionStatement(method) )
+        parent.getStatements().add(0, new ExpressionStatement(method))
 
     }
     /**
@@ -384,8 +395,34 @@ public class NextflowDSLImpl implements ASTTransformation {
         }
     }
 
+    protected void fixDirectiveWithNegativeValue( Statement stm ) {
+        if( stm instanceof ExpressionStatement && stm.getExpression() instanceof BinaryExpression ) {
+            def binary = (BinaryExpression)stm.getExpression()
+            if(!(binary.leftExpression instanceof VariableExpression))
+                return
+            if( binary.operation.type != Types.MINUS )
+                return
+
+            // -- transform the binary expression into a method call expression
+            //    where the left expression represents the method name to invoke
+            def methodName = ((VariableExpression)binary.leftExpression).name
+
+            // -- wrap the value into a minus operator
+            def value = (Expression)new UnaryMinusExpression( binary.rightExpression )
+            def args = new ArgumentListExpression( [value] )
+
+            // -- create the method call expression and replace it to the binary expression
+            def call = new MethodCallExpression(new VariableExpression('this'), methodName, args)
+            stm.setExpression(call)
+
+        }
+    }
+
     protected void fixStdinStdout( ExpressionStatement stm ) {
 
+        // transform the following syntax:
+        //      `stdin from x`  --> stdin() from (x)
+        //      `stdout into x` --> `stdout() into (x)`
         if( stm.expression instanceof PropertyExpression ) {
             def expr = (PropertyExpression)stm.expression
             def obj = expr.objectExpression
@@ -407,7 +444,25 @@ public class NextflowDSLImpl implements ASTTransformation {
                     stm.setExpression( from )
                 }
             }
-
+        }
+        // transform the following syntax:
+        //      `stdout into (x,y,..)` --> `stdout() into (x,y,..)`
+        else if( stm.expression instanceof MethodCallExpression ) {
+            def methodCall = (MethodCallExpression)stm.expression
+            if( 'stdout' == methodCall.getMethodAsString() ) {
+                def args = methodCall.getArguments()
+                if( args instanceof ArgumentListExpression && args.getExpressions() && args.getExpression(0) instanceof MethodCallExpression ) {
+                    def methodCall2 = (MethodCallExpression)args.getExpression(0)
+                    def args2 = methodCall2.getArguments()
+                    if( args2 instanceof ArgumentListExpression && methodCall2.methodAsString == 'into') {
+                        def vars = args2.getExpressions()
+                        def stdout = new MethodCallExpression( new VariableExpression('this'), 'stdout', new ArgumentListExpression()  )
+                        def into = new MethodCallExpression(stdout, 'into', new ArgumentListExpression(vars))
+                        // remove replace the old one with the new one
+                        stm.setExpression( into )
+                    }
+                }
+            }
         }
     }
 
@@ -424,7 +479,7 @@ public class NextflowDSLImpl implements ASTTransformation {
             def nested = methodCall.objectExpression instanceof MethodCallExpression
             log.trace "convert > input method: $methodName"
 
-            if( methodName in ['val','env','file','each', 'set','stdin'] ) {
+            if( methodName in ['val','env','file','each','set','stdin'] ) {
                 //this methods require a special prefix
                 if( !nested )
                     methodCall.setMethod( new ConstantExpression('_in_' + methodName) )
@@ -502,6 +557,8 @@ public class NextflowDSLImpl implements ASTTransformation {
 
     private boolean withinFileMethod
 
+    private boolean withinEachMethod
+
     /**
      * This method converts the a method call argument from a Variable to a Constant value
      * so that it is possible to reference variable that not yet exist
@@ -516,6 +573,7 @@ public class NextflowDSLImpl implements ASTTransformation {
 
         withinSetMethod = name == '_in_set' || name == '_out_set'
         withinFileMethod = name == '_in_file' || name == '_out_file'
+        withinEachMethod = name == '_in_each'
 
         try {
             varToConst(methodCall.getArguments())
@@ -523,6 +581,7 @@ public class NextflowDSLImpl implements ASTTransformation {
         } finally {
             withinSetMethod = false
             withinFileMethod = false
+            withinEachMethod = false
         }
 
     }
@@ -583,7 +642,7 @@ public class NextflowDSLImpl implements ASTTransformation {
              * input:
              *   set( file(fasta:'*.fa'), .. ) from q
              */
-            if( methodCall.methodAsString == 'file' && withinSetMethod ) {
+            if( methodCall.methodAsString == 'file' && (withinSetMethod || withinEachMethod) ) {
                 def args = (TupleExpression) varToConst(methodCall.arguments)
                 return newObj( TokenFileCall, args )
             }
@@ -756,7 +815,11 @@ public class NextflowDSLImpl implements ASTTransformation {
 
         final Map<String,TokenValRef> fAllVariables = [:]
 
+        final Set<String> localDef = []
+
         final SourceUnit sourceUnit
+
+        private boolean declaration
 
         VariableVisitor( SourceUnit unit ) {
             this.sourceUnit = unit
@@ -772,6 +835,17 @@ public class NextflowDSLImpl implements ASTTransformation {
             }
 
             return target instanceof VariableExpression
+        }
+
+        @Override
+        void visitDeclarationExpression(DeclarationExpression expr) {
+            declaration = true
+            try {
+                super.visitDeclarationExpression(expr)
+            }
+            finally {
+                declaration = false
+            }
         }
 
         @Override
@@ -797,7 +871,19 @@ public class NextflowDSLImpl implements ASTTransformation {
             final line = var.lineNumber
             final coln = var.columnNumber
 
-            if( name != 'this' && !fAllVariables.containsKey(name) ) {
+            if( name == 'this' )
+                return
+
+            if( declaration ) {
+                if( fAllVariables.containsKey(name) )
+                    sourceUnit.addError( new SyntaxException("Variable `$name` already defined in the process scope", line, coln))
+                else
+                    localDef.add(name)
+            }
+
+            // Note: variable declared in the process scope are not added
+            // to the set of referenced variables. Only global ones are tracked
+            else if( !localDef.contains(name) && !fAllVariables.containsKey(name) ) {
                 fAllVariables[name] = new TokenValRef(name,line,coln)
             }
         }

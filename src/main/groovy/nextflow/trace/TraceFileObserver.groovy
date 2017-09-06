@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,7 +19,6 @@
  */
 
 package nextflow.trace
-
 import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.Path
@@ -27,10 +26,12 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.ConcurrentHashMap
 
 import groovy.transform.CompileStatic
+import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import groovyx.gpars.agent.Agent
 import nextflow.Session
 import nextflow.processor.TaskHandler
+import nextflow.processor.TaskId
 import nextflow.processor.TaskProcessor
 /**
  * Create a CSV file containing the processes execution information
@@ -84,12 +85,11 @@ class TraceFileObserver implements TraceObserver {
     /**
      * Holds the the start time for tasks started/submitted but not yet completed
      */
-    private Map<Object,TraceRecord> current = new ConcurrentHashMap<>()
+    @PackageScope Map<TaskId,TraceRecord> current = new ConcurrentHashMap<>()
 
     private Agent<PrintWriter> writer
 
     private boolean useRawNumber
-
 
     void setFields( List<String> entries ) {
 
@@ -195,6 +195,12 @@ class TraceFileObserver implements TraceObserver {
     @Override
     void onFlowStart(Session session) {
         log.debug "Flow starting -- trace file: $tracePath"
+
+        // make sure parent path exists
+        def parent = tracePath.getParent()
+        if( parent )
+            Files.createDirectories(parent)
+
         // roll the any trace files that may exist
         tracePath.rollFile()
 
@@ -266,6 +272,12 @@ class TraceFileObserver implements TraceObserver {
 
         // save to the file
         writer.send { PrintWriter it -> it.println(render(record)); it.flush() }
+    }
+
+    @Override
+    void onProcessCached(TaskHandler handler) {
+        // save to the file
+        writer.send { PrintWriter it -> it.println(render( handler.getTraceRecord() )); it.flush() }
     }
 
     /**

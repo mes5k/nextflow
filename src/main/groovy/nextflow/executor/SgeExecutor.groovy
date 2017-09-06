@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,7 +21,6 @@
 package nextflow.executor
 import java.nio.file.Path
 
-import groovy.transform.PackageScope
 import nextflow.processor.TaskRun
 /**
  * Execute a task script by running it on the SGE/OGE cluster
@@ -39,12 +38,11 @@ class SgeExecutor extends AbstractGridExecutor {
      */
     protected List<String> getDirectives(TaskRun task, List<String> result) {
 
-        result << '-wd' << task.workDir.toString()
+        result << '-wd' << quote(task.workDir)
         result << '-N' << getJobNameFor(task)
-        result << '-o' << task.workDir.resolve(TaskRun.CMD_LOG).toString()
+        result << '-o' << quote(task.workDir.resolve(TaskRun.CMD_LOG))
         result << '-j' << 'y'
         result << '-terse' << ''    // note: directive need to be returned as pairs
-        result << '-V' << ''        // for this reason an empty string value is added for flag options
 
         /*
          * By using command line option -notify SIGUSR1 will be sent to your script prior to SIGSTOP
@@ -124,9 +122,8 @@ class SgeExecutor extends AbstractGridExecutor {
         throw new IllegalStateException("Invalid SGE submit response:\n$text\n\n")
     }
 
-
-    @PackageScope
-    String getKillCommand() { 'qdel' }
+    @Override
+    protected List<String> getKillCommand() { ['qdel'] }
 
     @Override
     protected List<String> queueStatusCommand(Object queue) {
@@ -145,7 +142,7 @@ class SgeExecutor extends AbstractGridExecutor {
     ]
 
     @Override
-    protected Map<?, QueueStatus> parseQueueStatus(String text) {
+    protected Map<String, QueueStatus> parseQueueStatus(String text) {
 
         def result = [:]
         text?.eachLine{ String row, int index ->
@@ -158,5 +155,15 @@ class SgeExecutor extends AbstractGridExecutor {
 
         return result
     }
+
+    @Override
+    String quote(Path path) {
+        // note: SGE does not recognize `\` escape character in the
+        // in the path defined as `#$` directives
+        // just double-quote paths containing blanks
+        def str = path.toString()
+        str.indexOf(' ') != -1 ? "\"$str\"" : str
+    }
+
 
 }

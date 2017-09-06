@@ -275,8 +275,6 @@ Prints::
     Sudha=Kumari
 
 
-
-
 A closure has another two important features. First it can access variables in the scope where it is defined and
 so it can `interact` with them.
 
@@ -293,6 +291,7 @@ As an example showing both these features see the following code fragment::
     println result
 
 
+Learn more about closures in the `Groovy documentation <http://groovy-lang.org/closures.html>`_
 
 .. _script-regexp:
 
@@ -424,7 +423,7 @@ given a file path string. For example::
 The ``file`` method can reference either `files` or `directories` depending on what the string path is locating in the
 file system.
 
-When using a wildcard character i.e. ``*`` or ``?`` the argument is interpreted as a `glob`_ path matcher
+When using wildcard characters i.e. ``*``, ``?``, ``[]`` and ``{}`` the argument is interpreted as a `glob`_ path matcher
 and the ``file`` method returns a list object holding the path of files
 whose name matches the specified pattern, or an empty list if no match is found. For example::
 
@@ -442,6 +441,7 @@ The list of available options is shown below:
 =============== ===================
 Name            Description
 =============== ===================
+glob            When ``true`` interprets characters ``*``, ``?``, ``[]`` and ``{}`` as glob wildcards, otherwise handles them as normal characters (default: ``true``)
 type            Type of paths returned, either ``file``, ``dir`` or ``any`` (default: ``file``)
 hidden          When ``true`` includes hidden files in the resulting paths (default: ``false``)
 maxDepth        Maximum number of directory levels to visit (default: `no limit`)
@@ -745,7 +745,7 @@ If the target path does not exist, it will be created automatically.
 .. tip:: The ``copyTo`` method mimics the semantic of the Linux command ``cp -r <source> <target>``,
   with the following caveats: Unix BASH distinguish between paths having or not having and ending slash, for example:
   ``/some/path/name`` and ``/some/path/name/``. The first locates a regular file while the latter identifies a directory
-  location. With Nextflow, due to Java files API implementation, this not possibles and both strings represents the same path.
+  location. With Nextflow, due to Java files API implementation, this is not possibles and both strings represents the same path.
   If that path exists on the file systems it is handled accordingly (as a regular file or as a directory). If the path does not
   exist, it is supposed to locate a regular file (and any parent directory will be created automatically).
 
@@ -845,8 +845,7 @@ Given a file variable representing any file or a directory, the method
 `Linux symbolic notation <http://en.wikipedia.org/wiki/File_system_permissions#Symbolic_notation>`_
 e.g. ``rw-rw-r--``. For example::
 
-
-  permissions = myFile.getPermissions()
+    permissions = myFile.getPermissions()
 
 
 In the same way the method ``setPermissions`` allows you to set the file access permissions using the same string
@@ -863,5 +862,21 @@ respectively the `owner`, `group` and `other` permissions. For example::
 
 Learn more about `File permissions numeric notation <http://en.wikipedia.org/wiki/File_system_permissions#Numeric_notation>`_.
 
+HTTP/FTP files
+--------------
+
+Nextflow provides a transparent integration for HTTP/S and FTP protocols that allows you to handle remote resources
+as local file system objects. Simply specify the resource URL as the argument of the `file` object. For example::
+
+    pdb = file('http://files.rcsb.org/header/5FID.pdb')
+
+Then, you will be able to access it as a local file as described in the previous sections. For example::
+
+    println pdb.text
+
+The above one-liner prints the content of the PDB file. See in the previous sections how to stream or copy the content
+of files.
+
+.. note:: Write and list operations are not supported by HTTP/S and FTP files.
 
 .. _glob: http://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#glob

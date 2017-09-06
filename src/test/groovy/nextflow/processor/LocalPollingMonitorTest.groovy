@@ -1,3 +1,23 @@
+/*
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ *
+ *   This file is part of 'Nextflow'.
+ *
+ *   Nextflow is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   Nextflow is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package nextflow.processor
 
 import java.lang.management.ManagementFactory
@@ -20,6 +40,7 @@ class LocalPollingMonitorTest extends Specification {
         def session = new Session()
         def monitor = new LocalPollingMonitor(
                 cpus: 10,
+                capacity: 20,
                 memory: _20_GB,
                 session: session,
                 name: 'local',
@@ -33,6 +54,7 @@ class LocalPollingMonitorTest extends Specification {
 
         expect:
         monitor.availCpus == 10
+        monitor.capacity == 20
         monitor.availMemory == _20_GB
         monitor.maxCpus == 10
         monitor.maxMemory == _20_GB
@@ -40,7 +62,7 @@ class LocalPollingMonitorTest extends Specification {
         when:
         monitor.submit(handler)
         then:
-        monitor.getPollingQueue().size()==1
+        monitor.getRunningQueue().size()==1
         monitor.availCpus == 7
         monitor.availMemory == MemoryUnit.of('18GB').toBytes()
         monitor.maxCpus == 10
@@ -49,7 +71,7 @@ class LocalPollingMonitorTest extends Specification {
         when:
         monitor.remove(handler)
         then:
-        monitor.getPollingQueue().size()==0
+        monitor.getRunningQueue().size()==0
         monitor.availCpus == 10
         monitor.availMemory == _20_GB
         monitor.maxCpus == 10
@@ -65,6 +87,7 @@ class LocalPollingMonitorTest extends Specification {
         def session = new Session()
         def monitor = new LocalPollingMonitor(
                 cpus: 10,
+                capacity: 10,
                 memory: _20_GB,
                 session: session,
                 name: 'local',
@@ -105,6 +128,7 @@ class LocalPollingMonitorTest extends Specification {
         def session = new Session()
         def monitor = new LocalPollingMonitor(
                 cpus: 1,
+                capacity: 1,
                 memory: _20_GB,
                 session: session,
                 name: 'local',
@@ -137,6 +161,7 @@ class LocalPollingMonitorTest extends Specification {
         def session = new Session()
         def monitor = new LocalPollingMonitor(
                 cpus: 10,
+                capacity: 20,
                 memory: _20_GB,
                 session: session,
                 name: 'local',
@@ -164,6 +189,7 @@ class LocalPollingMonitorTest extends Specification {
         def session = new Session()
         def monitor = new LocalPollingMonitor(
                 cpus: 10,
+                capacity: 20,
                 memory: _20_GB,
                 session: session,
                 name: 'local',

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,7 +19,6 @@
  */
 
 package nextflow
-import static nextflow.Const.EXTRAE_TRACE_CLASS
 import static nextflow.Const.S3_UPLOADER_CLASS
 
 import java.lang.reflect.Method
@@ -37,13 +36,18 @@ import groovy.util.logging.Slf4j
 import groovyx.gpars.GParsConfig
 import groovyx.gpars.dataflow.operator.DataflowProcessor
 import nextflow.dag.DAG
-import nextflow.trace.GraphObserver
+import nextflow.exception.AbortOperationException
+import nextflow.exception.AbortSignalException
 import nextflow.exception.MissingLibraryException
+import nextflow.file.FileHelper
+import nextflow.processor.ErrorStrategy
 import nextflow.processor.TaskDispatcher
 import nextflow.processor.TaskFault
 import nextflow.processor.TaskHandler
 import nextflow.processor.TaskProcessor
 import nextflow.script.ScriptBinding
+import nextflow.trace.ExtraeTraceObserver
+import nextflow.trace.GraphObserver
 import nextflow.trace.TimelineObserver
 import nextflow.trace.BroadcastObserver
 import nextflow.trace.TraceFileObserver
@@ -51,6 +55,10 @@ import nextflow.trace.TraceObserver
 import nextflow.util.Barrier
 import nextflow.util.ConfigHelper
 import nextflow.util.Duration
+import nextflow.util.HistoryFile
+import nextflow.util.NameGenerator
+import sun.misc.Signal
+import sun.misc.SignalHandler
 /**
  * Holds the information on the current execution
  *
@@ -63,7 +71,7 @@ class Session implements ISession {
     /**
      * Keep a list of all processor created
      */
-    final List<DataflowProcessor> allProcessors = []
+    final List<DataflowProcessor> allOperators = []
 
     /**
      * Dispatch tasks for executions
@@ -106,6 +114,11 @@ class Session implements ISession {
     String scriptClassName
 
     /**
+     * Mnemonic name of this run instance
+     */
+    String runName
+
+    /**
      * Folder(s) containing libs and classes to be added to the classpath
      */
     List<Path> libDir
@@ -119,9 +132,13 @@ class Session implements ISession {
 
     private DAG dag
 
+    private CacheDB cache
+
     private Barrier processesBarrier = new Barrier()
 
     private Barrier monitorsBarrier = new Barrier()
+
+    private volatile boolean cancelled
 
     private volatile boolean aborted
 
@@ -130,6 +147,8 @@ class Session implements ISession {
     private volatile ExecutorService execService
 
     private volatile TaskFault fault
+
+    private volatile Throwable error
 
     private ScriptBinding binding
 
@@ -141,11 +160,19 @@ class Session implements ISession {
 
     private Queue<TraceObserver> observers
 
+    private Closure errorAction
+
     private boolean statsEnabled
 
     boolean getStatsEnabled() { statsEnabled }
 
+    private boolean dumpHashes
+
+    boolean getDumpHashes() { dumpHashes }
+
     TaskFault getFault() { fault }
+
+    Throwable getError() { error }
 
     /**
      * Creates a new session with an 'empty' (default) configuration
@@ -188,6 +215,8 @@ class Session implements ISession {
      */
     TaskDispatcher getDispatcher() { dispatcher }
 
+    CacheDB getCache() { cache }
+
     /**
      * Creates a new session using the configuration properties provided
      *
@@ -198,14 +227,16 @@ class Session implements ISession {
 
         this.binding = binding
         this.config = binding.config
+        this.dumpHashes = config.dumpHashes
 
-        // poor man session object dependency injection
+        // -- poor man session object dependency injection
         Global.setSession(this)
         Global.setConfig(config)
 
+        // -- cacheable flag
         cacheable = config.cacheable
 
-        // sets resumeMode and uniqueId
+        // -- sets resumeMode and uniqueId
         if( config.resume ) {
             resumeMode = true
             uniqueId = UUID.fromString(config.resume as String)
@@ -215,7 +246,11 @@ class Session implements ISession {
         }
         log.debug "Session uuid: $uniqueId"
 
-        // normalize taskConfig object
+        // -- set the run name
+        this.runName = config.runName ?: NameGenerator.next()
+        log.debug "Run name: $runName"
+
+        // -- normalize taskConfig object
         if( config.process == null ) config.process = [:]
         if( config.env == null ) config.env = [:]
 
@@ -224,13 +259,14 @@ class Session implements ISession {
             config.poolSize = cpus==1 ? 2 : cpus
         }
 
-        //set the thread pool size
+        // -- set the thread pool size
         this.poolSize = config.poolSize as int
         log.debug "Executor pool size: ${poolSize}"
 
-        // create the task dispatcher instance
+        // -- create the task dispatcher instance
         this.dispatcher = new TaskDispatcher(this)
 
+        // -- DGA object
         this.dag = new DAG(session:this)
     }
 
@@ -242,6 +278,9 @@ class Session implements ISession {
         this.workDir = ((config.workDir ?: 'work') as Path).complete()
         this.setLibDir( config.libDir as String )
 
+        if(!workDir.mkdirs()) throw new AbortOperationException("Cannot create work-dir: $workDir -- Make sure you have write permissions or specify a different directory by using the `-w` command line option")
+        log.debug "Work-dir: ${workDir} [${FileHelper.getPathFsType(workDir)}]"
+
         if( scriptPath ) {
             // the folder that contains the main script
             this.setBaseDir(scriptPath.parent)
@@ -251,6 +290,8 @@ class Session implements ISession {
 
         this.observers = createObservers()
         this.statsEnabled = observers.size()>0
+
+        cache = new CacheDB(uniqueId,runName).open()
     }
 
     /**
@@ -279,7 +320,7 @@ class Session implements ISession {
         Boolean isEnabled = config.navigate('extrae.enabled') as Boolean
         if( isEnabled ) {
             try {
-                result << (TraceObserver)Class.forName(EXTRAE_TRACE_CLASS).newInstance()
+                result << new ExtraeTraceObserver()
             }
             catch( Exception e ) {
                 log.warn("Unable to load Extrae profiler",e)
@@ -337,14 +378,58 @@ class Session implements ISession {
             config.navigate('trace.sep') { observer.separator = it }
             config.navigate('trace.fields') { observer.setFieldsAndFormats(it) }
             result << observer
-    }
+        }
     }
 
-    def Session start() {
+    /*
+     * intercepts interruption signal i.e. CTRL+C
+     * - on the first invoke session#abort
+     * - on third force termination with System#exit
+     */
+    private void registerSignalHandlers() {
+
+        int c = 0
+        final ctrl_c = { Signal sig ->
+            switch( ++c ) {
+                case 1: abort(new AbortSignalException(sig)); println ''; break
+                case 2: println "One more CTRL+C to force exit"; break
+                default: log.info 'Adieu'; System.exit(1)
+            }
+
+        } as SignalHandler
+
+        // -- abort session handler
+        final abort_h = { Signal sig -> abort(new AbortSignalException(sig)) } as SignalHandler
+
+        // -- register handlers
+        Signal.handle( new Signal("INT"), ctrl_c)
+        Signal.handle( new Signal("TERM"), abort_h)
+        Signal.handle( new Signal("HUP"), abort_h)
+    }
+
+    /**
+     * Dump the current dataflow network listing
+     * the status of active processes and operators
+     * for debugging purpose
+     */
+    String dumpNetworkStatus() {
+        try {
+            def msg = dag.dumpActiveNodes()
+            msg ? "The following nodes are still active:\n" + msg : null
+        }
+        catch( Exception e ) {
+            log.debug "Unexpected error dumping DGA status", e
+            return null
+        }
+    }
+
+
+    Session start() {
         log.debug "Session start invoked"
 
         // register shut-down cleanup hooks
-        Global.onShutdown { cleanUp() }
+        registerSignalHandlers()
+
         // create tasks executor
         execService = Executors.newFixedThreadPool(poolSize)
         // signal start to tasks dispatcher
@@ -421,35 +506,43 @@ class Session implements ISession {
     void await() {
         log.debug "Session await"
         processesBarrier.awaitCompletion()
-        log.debug "Session await > processes completed"
+        log.debug "Session await > all process finished"
         terminated = true
         monitorsBarrier.awaitCompletion()
-        log.debug "Session await > done"
+        log.debug "Session await > all barriers passed"
     }
 
     void destroy() {
-        log.trace "Session > destroying"
+        try {
+            log.trace "Session > destroying"
+            if( !aborted ) {
+                allOperators *. join()
+                log.trace "Session > after processors join"
+            }
 
-        if( !aborted ) {
-            allProcessors *. join()
-            log.trace "Session > after processors join"
+            cleanUp()
+            log.trace "Session > after cleanup"
+
+            execService.shutdown()
+            execService = null
+            log.trace "Session > executor shutdown"
+
+            // -- close db
+            cache?.close()
+
+            // -- shutdown s3 uploader
+            shutdownS3Uploader()
         }
-
-        cleanUp()
-        log.trace "Session > after cleanup"
-
-        execService.shutdown()
-        execService = null
-        log.trace "Session > executor shutdown"
-
-        // -- shutdown s3 uploader
-        shutdownS3Uploader()
-
-        log.debug "Session destroyed"
+        finally {
+            // -- update the history file
+            if( HistoryFile.DEFAULT.exists() ) {
+                HistoryFile.DEFAULT.update(runName,isSuccess())
+            }
+            log.trace "Session destroyed"
+        }
     }
 
     final protected void cleanUp() {
-
         log.trace "Shutdown: $shutdownCallbacks"
         while( shutdownCallbacks.size() ) {
             def hook = shutdownCallbacks.poll()
@@ -474,29 +567,81 @@ class Session implements ISession {
             }
         }
 
+        // -- global
+        Global.cleanUp()
     }
 
-    void abort(TaskFault fault) {
-        if( aborted ) return
+    /**
+     * Halt the pipeline execution choosing exiting immediately or completing current
+     * pending task depending the chosen {@link ErrorStrategy}
+     *
+     * @param fault A {@link TaskFault} instance representing the error that caused the pipeline to stop
+     */
+    void fault(TaskFault fault, TaskHandler handler=null) {
+        if( this.fault ) { return }
         this.fault = fault
-        abort(fault.error)
+
+        if( fault.strategy == ErrorStrategy.FINISH ) {
+            cancel(handler)
+        }
+        else {
+            abort(fault.error)
+        }
     }
 
-    void abort(Throwable cause = null) {
-        if( aborted ) return
-        log.debug "Session aborted -- Cause: ${cause}"
-        aborted = true
+    /**
+     * Cancel the pipeline execution waiting for the current running tasks to complete
+     */
+    @PackageScope
+    void cancel(TaskHandler handler) {
+        log.info "Execution cancelled -- Finishing pending tasks before exit"
+        cancelled = true
+        notifyError(handler)
         dispatcher.signal()
         processesBarrier.forceTermination()
-        monitorsBarrier.forceTermination()
-        allProcessors *. terminate()
+        allOperators *. terminate()
     }
 
+    /**
+     * Terminate the pipeline execution killing all running tasks
+     *
+     * @param cause A {@link Throwable} instance representing the execution that caused the pipeline execution to abort
+     */
+    void abort(Throwable cause = null) {
+        if( aborted ) return
+        log.debug "Session aborted -- Cause: ${cause?.message ?: cause ?: '-'}"
+        aborted = true
+        error = cause
+        try {
+            // log the dataflow network status
+            def status = dumpNetworkStatus()
+            if( status )
+                log.debug(status)
+            // force termination
+            notifyError(null)
+            dispatcher.signal()
+            processesBarrier.forceTermination()
+            monitorsBarrier.forceTermination()
+            operatorsForceTermination()
+        }
+        catch( Throwable e ) {
+            log.debug "Unexpected error while aborting execution", e
+        }
+    }
+
+    private void operatorsForceTermination() {
+        def operators = (DataflowProcessor[])allOperators.toArray()
+        for( int i=0; i<operators.size(); i++ ) {
+            operators[i].terminate()
+        }
+    }
+
+    @PackageScope
     void forceTermination() {
         terminated = true
         processesBarrier.forceTermination()
         monitorsBarrier.forceTermination()
-        allProcessors *. terminate()
+        allOperators *. terminate()
 
         execService?.shutdownNow()
         GParsConfig.shutdown()
@@ -505,6 +650,10 @@ class Session implements ISession {
     boolean isTerminated() { terminated }
 
     boolean isAborted() { aborted }
+
+    boolean isCancelled() { cancelled }
+
+    boolean isSuccess() { !aborted && !cancelled }
 
     void processRegister(TaskProcessor process) {
         log.debug ">>> barrier register (process: ${process.name})"
@@ -533,7 +682,12 @@ class Session implements ISession {
 
     void notifyProcessCreate(TaskProcessor process) {
         for( TraceObserver it : observers ) {
-            it.onProcessCreate(process)
+            try {
+                it.onProcessCreate(process)
+            }
+            catch( Exception e ) {
+                log.debug(e.getMessage(), e)
+            }
         }
     }
 
@@ -542,12 +696,17 @@ class Session implements ISession {
      * Notifies that a task has been submitted
      */
     void notifyTaskSubmit( TaskHandler handler ) {
+        final task = handler.task
+        log.info "[${task.hashLog}] ${task.runType.message} > ${task.name}"
+        // -- save a record in the cache index
+        cache.putIndexAsync(handler)
+
         for( TraceObserver it : observers ) {
             try {
                 it.onProcessSubmit(handler)
             }
             catch( Exception e ) {
-                log.error(e.getMessage(), e)
+                log.debug(e.getMessage(), e)
             }
         }
     }
@@ -561,7 +720,7 @@ class Session implements ISession {
                 it.onProcessStart(handler)
             }
             catch( Exception e ) {
-                log.error(e.getMessage(), e)
+                log.debug(e.getMessage(), e)
             }
         }
     }
@@ -572,16 +731,62 @@ class Session implements ISession {
      * @param handler
      */
     void notifyTaskComplete( TaskHandler handler ) {
+        // save the completed task in the cache DB
+        cache.putTaskAsync(handler)
+
         // notify the event to the observers
         for( TraceObserver it : observers ) {
             try {
                 it.onProcessComplete(handler)
             }
             catch( Exception e ) {
+                log.debug(e.getMessage(), e)
+            }
+        }
+    }
+
+
+    void notifyTaskCached( TaskHandler handler ) {
+        // -- save a record in the cache index
+        cache.cacheTaskAsync(handler)
+
+        for( TraceObserver it : observers ) {
+            try {
+                it.onProcessCached(handler)
+            }
+            catch( Exception e ) {
                 log.error(e.getMessage(), e)
             }
         }
     }
+
+
+    /**
+     * Notify a task failure
+     *
+     * @param handler
+     * @param e
+     */
+    void notifyError( TaskHandler handler ) {
+        if( !errorAction )
+            return
+
+        try {
+            errorAction.call( handler?.getTraceRecord() )
+        }
+        catch( Throwable e ) {
+            log.debug(e.getMessage(), e)
+        }
+    }
+
+    /**
+     * Define the error event handler
+     * @param action
+     */
+    void onError( Closure action ) {
+        errorAction = action
+    }
+
 
     @Memoized
     public getExecConfigProp( String execName, String name, Object defValue, Map env = null  ) {
@@ -669,32 +874,5 @@ class Session implements ISession {
         return find.invoke(ClassLoader.getSystemClassLoader(), className)
     }
 
-
-//    /**
-//     * Create a table report of all executed or running tasks
-//     *
-//     * @return A string table formatted displaying the tasks information
-//     */
-//    String tasksReport() {
-//
-//        TableBuilder table = new TableBuilder()
-//                .head('name')
-//                .head('id')
-//                .head('status')
-//                .head('path')
-//                .head('exit')
-//
-//        tasks.entries().each { Map.Entry<Processor, TaskDef> entry ->
-//            table << entry.key.name
-//            table << entry.value.id
-//            table << entry.value.status
-//            table << entry.value.workDirectory
-//            table << entry.value.exitCode
-//            table << table.closeRow()
-//        }
-//
-//        table.toString()
-//
-//    }
 
 }

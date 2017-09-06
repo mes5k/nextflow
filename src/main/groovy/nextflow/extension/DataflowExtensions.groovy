@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,15 +19,18 @@
  */
 
 package nextflow.extension
-import static java.util.Arrays.asList
+import static DataflowHelper.newOperator
+import static DataflowHelper.chainImpl
+import static DataflowHelper.reduceImpl
+import static DataflowHelper.subscribeImpl
 import static nextflow.util.CheckHelper.checkParams
 
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import groovyx.gpars.agent.Agent
-import groovyx.gpars.dataflow.Dataflow
 import groovyx.gpars.dataflow.DataflowBroadcast
 import groovyx.gpars.dataflow.DataflowChannel
 import groovyx.gpars.dataflow.DataflowQueue
@@ -38,14 +41,15 @@ import groovyx.gpars.dataflow.expression.DataflowExpression
 import groovyx.gpars.dataflow.operator.ChainWithClosure
 import groovyx.gpars.dataflow.operator.CopyChannelsClosure
 import groovyx.gpars.dataflow.operator.DataflowEventAdapter
-import groovyx.gpars.dataflow.operator.DataflowEventListener
 import groovyx.gpars.dataflow.operator.DataflowProcessor
 import groovyx.gpars.dataflow.operator.PoisonPill
 import nextflow.Channel
 import nextflow.Global
 import nextflow.Session
+import nextflow.dag.NodeMarker
 import org.codehaus.groovy.runtime.callsite.BooleanReturningMethodInvoker
 import org.codehaus.groovy.runtime.typehandling.DefaultTypeTransformation
+
 /**
  * A set of operators inspired to RxJava extending the methods available on DataflowChannel
  * data structure
@@ -77,100 +81,6 @@ class DataflowExtensions {
 
     }
 
-    /*
-     * The default operators listener when no other else is specified
-     */
-    @PackageScope
-    static DEF_ERROR_LISTENER = new DataflowEventAdapter() {
-        @Override
-        public boolean onException(final DataflowProcessor processor, final Throwable e) {
-            DataflowExtensions.log.error("@unknown", e)
-            session.abort(e)
-            return true;
-        }
-    }
-
-    /**
-     * Creates a new {@code Dataflow.operator} adding the created instance to the current session list
-     *
-     * @see Session#allProcessors
-     *
-     * @param params The map holding inputs, outputs channels and other parameters
-     * @param code The closure to be executed by the operator
-     */
-    @PackageScope
-    static DataflowProcessor newOperator( Map params, Closure code ) {
-
-        // -- add a default error listener
-        if( !params.containsKey('listeners') ) {
-            // add the default error handler
-            params.listeners = [ DEF_ERROR_LISTENER ]
-        }
-
-        final op = Dataflow.operator(params, code)
-        if( session && session.allProcessors != null ) {
-            session.allProcessors.add(op)
-        }
-
-        return op
-    }
-
-    /**
-     * Creates a new {@code Dataflow.operator} adding the created instance to the current session list
-     *
-     * @see Session#allProcessors
-     *
-     * @param inputs The list of the input {@code DataflowReadChannel}s
-     * @param outputs The list of list output {@code DataflowWriteChannel}s
-     * @param code The closure to be executed by the operator
-     */
-    @PackageScope
-    static DataflowProcessor newOperator( List inputs, List outputs, Closure code ) {
-        newOperator( inputs: inputs, outputs: outputs, code )
-    }
-
-    /**
-     * Creates a new {@code Dataflow.operator} adding the created instance to the current session list
-     *
-     * @see Session#allProcessors
-     *
-     * @param input An instance of {@code DataflowReadChannel} representing the input channel
-     * @param output An instance of {@code DataflowWriteChannel} representing the output channel
-     * @param code The closure to be executed by the operator
-     */
-    @PackageScope
-    static DataflowProcessor newOperator( DataflowReadChannel input, DataflowWriteChannel output, Closure code ) {
-       newOperator(input, output, DEF_ERROR_LISTENER, code )
-    }
-
-    /**
-     * Creates a new {@code Dataflow.operator} adding the created instance to the current session list
-     *
-     * @see Session#allProcessors
-     *
-     * @param input An instance of {@code DataflowReadChannel} representing the input channel
-     * @param output An instance of {@code DataflowWriteChannel} representing the output channel
-     * @param listener An instance of {@code DataflowEventListener} listening to operator's events
-     * @param code The closure to be executed by the operator
-     */
-    @PackageScope
-    static DataflowProcessor newOperator( DataflowReadChannel input, DataflowWriteChannel output, DataflowEventListener listener, Closure code ) {
-
-        if( !listener )
-            listener = DEF_ERROR_LISTENER
-
-        def params = [:]
-        params.inputs = [input]
-        params.outputs = [output]
-        params.listeners = [listener]
-
-        final op = Dataflow.operator(params, code)
-        if( session && session.allProcessors != null ) {
-            session.allProcessors << op
-        }
-        return op
-    }
-
 
     /**
      * Create a dataflow object by the type of the specified source argument
@@ -194,29 +104,6 @@ class DataflowExtensions {
 
     }
 
-    /*
-     * the list of valid subscription handlers
-     */
-    static private VALID_HANDLERS = [ 'onNext', 'onComplete', 'onError' ]
-
-    /**
-     * Verify that the map contains only valid names of subscribe handlers.
-     * Throws an {@code IllegalArgumentException} when an invalid name is specified
-     *
-     * @param handlers The handlers map
-     */
-    static private final checkSubscribeHandlers( Map handlers ) {
-
-        if( !handlers ) {
-            throw new IllegalArgumentException("You must specify at least an event between: onNext, onComplete, onError")
-        }
-
-        handlers.keySet().each {
-            if( !VALID_HANDLERS.contains(it) )  throw new IllegalArgumentException("Not a valid handler name: $it")
-        }
-
-    }
-
     /**
      * Subscribe *onNext* event
      *
@@ -224,9 +111,9 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    static public final <V> DataflowReadChannel<V> subscribe(final DataflowReadChannel<V> source, final Closure<V> closure) {
+    static final <V> DataflowReadChannel<V> subscribe(final DataflowReadChannel<V> source, final Closure<V> closure) {
         subscribeImpl( source, [onNext: closure] )
-        session.dag.addOperatorNode('subscribe', source, null)
+        NodeMarker.addOperatorNode('subscribe', source, null)
         return source
     }
 
@@ -237,60 +124,10 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    static public final <V> DataflowReadChannel<V> subscribe(final DataflowReadChannel<V> source, final Map<String,Closure> events ) {
+    static final <V> DataflowReadChannel<V> subscribe(final DataflowReadChannel<V> source, final Map<String,Closure> events ) {
         subscribeImpl(source, events)
-        session.dag.addOperatorNode('subscribe', source, null)
+        NodeMarker.addOperatorNode('subscribe', source, null)
         return source
-    }
-
-    /**
-     * Subscribe *onNext*, *onError* and *onComplete*
-     *
-     * @param source
-     * @param closure
-     * @return
-     */
-    static public final <V> DataflowProcessor subscribeImpl(final DataflowReadChannel<V> source, final Map<String,Closure> events ) {
-        checkSubscribeHandlers(events)
-
-        def error = false
-        def stopOnFirst = source instanceof DataflowExpression
-        def listener = new DataflowEventAdapter() {
-
-            @Override
-            public void afterStop(final DataflowProcessor processor) {
-                if( !events.onComplete || error ) return
-                events.onComplete.call(processor)
-            }
-
-            @Override
-            public boolean onException(final DataflowProcessor processor, final Throwable e) {
-                error = true
-                if( !events.onError ) {
-                    DataflowExtensions.log.error("@unknown", e)
-                    session.abort(e)
-                }
-                else {
-                    events.onError.call(e)
-                }
-                return true
-            }
-        }
-
-
-        final Map<String, Object> parameters = new HashMap<String, Object>();
-        parameters.put("inputs", [source])
-        parameters.put("outputs", [])
-        parameters.put('listeners', [listener])
-
-        newOperator(parameters) {
-            if( events.onNext ) {
-                events.onNext.call(it)
-            }
-            if( stopOnFirst ) {
-                ((DataflowProcessor) getDelegate()).terminate()
-            }
-        }
     }
 
     /**
@@ -300,11 +137,11 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    public static <V> DataflowReadChannel<V> chain(final DataflowReadChannel<?> source, final Closure<V> closure) {
+    static <V> DataflowReadChannel<V> chain(final DataflowReadChannel<?> source, final Closure<V> closure) {
 
         final DataflowReadChannel<V> target = newChannelBy(source)
         newOperator(source, target, new ChainWithClosure<V>(closure))
-        session.dag.addOperatorNode('chain', source, target)
+        NodeMarker.addOperatorNode('chain', source, target)
 
         return target;
     }
@@ -317,22 +154,13 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    public static <V> DataflowReadChannel<V> chain(final DataflowReadChannel<?> source, final Map<String, Object> params, final Closure<V> closure) {
+    static <V> DataflowReadChannel<V> chain(final DataflowReadChannel<?> source, final Map<String, Object> params, final Closure<V> closure) {
 
         final DataflowReadChannel<V> target = newChannelBy(source)
         chainImpl(source, target, params, closure)
-        session.dag.addOperatorNode('chain', source, target)
+        NodeMarker.addOperatorNode('chain', source, target)
 
         return target;
-    }
-
-    private static <V> DataflowProcessor chainImpl(final DataflowReadChannel<?> source, final DataflowReadChannel<V> target, final Map params, final Closure<V> closure) {
-
-        final Map<String, Object> parameters = new HashMap<String, Object>(params)
-        parameters.put("inputs", asList(source))
-        parameters.put("outputs", asList(target))
-
-        newOperator(parameters, new ChainWithClosure<V>(closure))
     }
 
     /**
@@ -342,29 +170,13 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    static public final <V> DataflowReadChannel<V> map(final DataflowReadChannel<?> source, final Closure<V> closure) {
+    static final <V> DataflowReadChannel<V> map(final DataflowReadChannel<?> source, final Closure<V> closure) {
         assert source != null
         assert closure
 
-        final stopOnFirst = source instanceof DataflowExpression
-        DataflowReadChannel<V> target = newChannelBy(source);
-        newOperator(source, target) { it ->
+        def target = new MapOp(source, closure).apply()
 
-            def result = closure.call(it)
-            def proc = ((DataflowProcessor) getDelegate())
-
-            // bind the result value
-            if (result != Channel.VOID)
-                proc.bindOutput(result)
-
-            // when the `map` operator is applied to a dataflow flow variable
-            // terminate the processor after the first emission -- Issue #44
-            if( result == Channel.STOP || stopOnFirst )
-                proc.terminate()
-
-        }
-
-        session.dag.addOperatorNode('map', source, target)
+        NodeMarker.addOperatorNode('map', source, target)
         return target;
     }
 
@@ -376,7 +188,7 @@ class DataflowExtensions {
      * @param closure The closure mapping the values emitted by the source channel
      * @return The channel emitting the mapped values
      */
-    static public final <V> DataflowReadChannel<V> flatMap(final DataflowReadChannel<?> source, final Closure<V> closure=null) {
+    static final <V> DataflowReadChannel<V> flatMap(final DataflowReadChannel<?> source, final Closure<V> closure=null) {
         assert source != null
 
         final target = new DataflowQueue()
@@ -429,7 +241,7 @@ class DataflowExtensions {
             }
         }
 
-        session.dag.addOperatorNode('flatMap', source, target)
+        NodeMarker.addOperatorNode('flatMap', source, target)
         return target
     }
 
@@ -446,11 +258,11 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    static public final <V> DataflowReadChannel<V> reduce(final DataflowReadChannel<?> source, final Closure<V> closure) {
+    static final <V> DataflowReadChannel<V> reduce(final DataflowReadChannel<?> source, final Closure<V> closure) {
         assert source instanceof DataflowQueue
         final target = new DataflowVariable()
         reduceImpl( source, target, null, closure )
-        session.dag.addOperatorNode('reduce', source, target)
+        NodeMarker.addOperatorNode('reduce', source, target)
         return target
     }
 
@@ -469,79 +281,29 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    static public final <V> DataflowReadChannel<V> reduce(final DataflowReadChannel<?> source, V seed, final Closure<V> closure) {
+    static final <V> DataflowReadChannel<V> reduce(final DataflowReadChannel<?> source, V seed, final Closure<V> closure) {
         assert !(source instanceof DataflowExpression)
         final target = new DataflowVariable()
         reduceImpl( source, target, seed, closure )
-        session.dag.addOperatorNode('reduce', source, target)
+        NodeMarker.addOperatorNode('reduce', source, target)
         return target
     }
 
-    /**
-     * Implements the {@code #reduce} operator
-     *
-     * @param channel
-     * @param seed
-     * @param closure
-     * @return
-     */
-    static private <V> DataflowProcessor reduceImpl(final DataflowReadChannel<?> channel, final DataflowVariable result, def seed, final Closure<V> closure) {
-
-        // the *accumulator* value
-        def accum = seed
-
-        // intercepts operator events
-        def listener = new DataflowEventAdapter() {
-            /*
-             * call the passed closure each time
-             */
-            public void afterRun(final DataflowProcessor processor, final List<Object> messages) {
-                final item = messages.get(0)
-                final value = accum == null ? item : closure.call(accum, item)
-
-                if( value == Channel.VOID ) {
-                    // do nothing
-                }
-                else if( value == Channel.STOP ) {
-                    processor.terminate()
-                }
-                else {
-                    accum = value
-                }
-            }
-
-            /*
-             * when terminates bind the result value
-             */
-            public void afterStop(final DataflowProcessor processor) {
-                result.bind(accum)
-            }
-
-            public boolean onException(final DataflowProcessor processor, final Throwable e) {
-                DataflowExtensions.log.error("@unknown", e)
-                session.abort(e)
-                return true;
-            }
-        }
-
-        chainImpl(channel, new DataflowQueue(), [listeners: [listener]], {true})
-    }
-
-    static public final DataflowReadChannel collectFile( final DataflowReadChannel source, final Closure closure = null ) {
+    static final DataflowReadChannel collectFile( final DataflowReadChannel source, final Closure closure = null ) {
         final result = new CollectFileOp(source, null, closure).apply()
-        session.dag.addOperatorNode('collectFile', source, result)
+        NodeMarker.addOperatorNode('collectFile', source, result)
         return result
     }
 
-    static public final DataflowReadChannel collectFile( final DataflowReadChannel source, Map params, final Closure closure = null ) {
+    static final DataflowReadChannel collectFile( final DataflowReadChannel source, Map params, final Closure closure = null ) {
         def result = new CollectFileOp(source, params, closure).apply()
-        session.dag.addOperatorNode('collectFile', source, result)
+        NodeMarker.addOperatorNode('collectFile', source, result)
         return result
     }
 
-    static public final DataflowReadChannel groupTuple( final DataflowReadChannel source, final Map params ) {
+    static final DataflowReadChannel groupTuple( final DataflowReadChannel source, final Map params ) {
         def result = new GroupTupleOp(params, source).apply()
-        session.dag.addOperatorNode('groupTuple', source, result)
+        NodeMarker.addOperatorNode('groupTuple', source, result)
         return result
     }
 
@@ -561,28 +323,28 @@ class DataflowExtensions {
      * @param criteria
      * @return
      */
-    static public final <V> DataflowReadChannel<V> filter(final DataflowReadChannel<V> source, final Object criteria) {
+    static final <V> DataflowReadChannel<V> filter(final DataflowReadChannel<V> source, final Object criteria) {
         def discriminator = new BooleanReturningMethodInvoker("isCase");
         def target = newChannelBy(source)
         newOperator(source, target, {
             def result = discriminator.invoke(criteria, (Object)it)
             if( result ) target.bind(it)
         })
-        session.dag.addOperatorNode('filter', source, target)
+        NodeMarker.addOperatorNode('filter', source, target)
         return target
     }
 
-    static public <T> DataflowReadChannel<T> filter(DataflowReadChannel<T> source, final Closure<Boolean> closure) {
+    static <T> DataflowReadChannel<T> filter(DataflowReadChannel<T> source, final Closure<Boolean> closure) {
         def target = newChannelBy(source)
         newOperator(source, target, {
             def result = DefaultTypeTransformation.castToBoolean(closure.call(it))
             if( result ) target.bind(it)
         })
-        session.dag.addOperatorNode('filter', source, target)
+        NodeMarker.addOperatorNode('filter', source, target)
         return target
     }
 
-    static public <T> DataflowReadChannel<T> until(DataflowReadChannel<T> source, final Closure<Boolean> closure) {
+    static <T> DataflowReadChannel<T> until(DataflowReadChannel<T> source, final Closure<Boolean> closure) {
         def target = newChannelBy(source)
         newOperator(source, target, {
             final result = DefaultTypeTransformation.castToBoolean(closure.call(it))
@@ -596,7 +358,7 @@ class DataflowExtensions {
                 proc.bindOutput(it)
             }
         })
-        session.dag.addOperatorNode('until', source, target)
+        NodeMarker.addOperatorNode('until', source, target)
         return target
     }
 
@@ -609,7 +371,7 @@ class DataflowExtensions {
      * @param source
      * @return
      */
-    static public final <V> DataflowReadChannel<V> unique(final DataflowReadChannel<V> source) {
+    static final <V> DataflowReadChannel<V> unique(final DataflowReadChannel<V> source) {
         unique(source) { it }
     }
 
@@ -622,7 +384,7 @@ class DataflowExtensions {
      * @param comparator
      * @return
      */
-    static public final <V> DataflowReadChannel<V> unique(final DataflowReadChannel<V> source, Closure comparator ) {
+    static final <V> DataflowReadChannel<V> unique(final DataflowReadChannel<V> source, Closure comparator ) {
 
         def history = [:]
         def target = newChannelBy(source)
@@ -649,7 +411,7 @@ class DataflowExtensions {
         // filter removing all duplicates
         chainImpl(source, target, [listeners: [events]], filter )
 
-        session.dag.addOperatorNode('unique', source, target)
+        NodeMarker.addOperatorNode('unique', source, target)
         return target
     }
 
@@ -661,7 +423,7 @@ class DataflowExtensions {
      *
      * @return
      */
-    static public final <V> DataflowReadChannel<V> distinct( final DataflowReadChannel<V> source ) {
+    static final <V> DataflowReadChannel<V> distinct( final DataflowReadChannel<V> source ) {
         distinct(source) {it}
     }
 
@@ -672,7 +434,7 @@ class DataflowExtensions {
      *
      * @return
      */
-    static public final <V> DataflowReadChannel<V> distinct( final DataflowReadChannel<V> source, Closure<?> comparator ) {
+    static final <V> DataflowReadChannel<V> distinct( final DataflowReadChannel<V> source, Closure<?> comparator ) {
 
         def previous = null
         final DataflowReadChannel<V> target = newChannelBy(source)
@@ -688,7 +450,7 @@ class DataflowExtensions {
 
         chainImpl(source, target, [:], filter)
 
-        session.dag.addOperatorNode('distinct', source, target)
+        NodeMarker.addOperatorNode('distinct', source, target)
         return target
     }
 
@@ -701,11 +463,18 @@ class DataflowExtensions {
      * @param source
      * @return
      */
-    static public final <V> DataflowReadChannel<V> first( DataflowReadChannel<V> source ) {
+    static final <V> DataflowReadChannel<V> first( DataflowReadChannel<V> source ) {
+        if( source instanceof DataflowExpression ) {
+            def msg = "The use of `first` operator is unnecessary when applied to a value channel"
+            def name = session?.binding?.getVariableName(source)
+            if( name )
+                msg += " -- check channel `$name`"
+            log.warn msg
+        }
 
         def target = new DataflowVariable<V>()
         source.whenBound { target.bind(it) }
-        session.dag.addOperatorNode('first', source, target)
+        NodeMarker.addOperatorNode('first', source, target)
         return target
     }
 
@@ -718,7 +487,7 @@ class DataflowExtensions {
      * @param source
      * @return
      */
-    static public final <V> DataflowReadChannel<V> first( final DataflowReadChannel<V> source, Object criteria ) {
+    static final <V> DataflowReadChannel<V> first( final DataflowReadChannel<V> source, Object criteria ) {
         assert !(source instanceof DataflowExpression)
 
         def target = new DataflowVariable()
@@ -731,7 +500,7 @@ class DataflowExtensions {
             }
         }
 
-        session.dag.addOperatorNode('first', source, target)
+        NodeMarker.addOperatorNode('first', source, target)
         return target
     }
 
@@ -745,7 +514,7 @@ class DataflowExtensions {
      * @param n The number of items to be taken. The value {@code -1} has a special semantic for all
      * @return The resulting channel emitting the taken values
      */
-    static public final <V> DataflowReadChannel<V> take( final DataflowReadChannel<V> source, int n ) {
+    static final <V> DataflowReadChannel<V> take( final DataflowReadChannel<V> source, int n ) {
         assert !(source instanceof DataflowExpression)
 
         def count = 0
@@ -778,7 +547,7 @@ class DataflowExtensions {
                 listeners: (n > 0 ? [listener] : []),
                 new ChainWithClosure(new CopyChannelsClosure()))
 
-        session.dag.addOperatorNode('take', source, target)
+        NodeMarker.addOperatorNode('take', source, target)
         return target
     }
 
@@ -788,12 +557,22 @@ class DataflowExtensions {
      * @param source The source channel
      * @return A {@code DataflowVariable} emitting the `last` item in the channel
      */
-    static public final <V> DataflowReadChannel<V> last( final DataflowReadChannel<V> source ) {
+    static final <V> DataflowReadChannel<V> last( final DataflowReadChannel<V> source ) {
 
         def target = new DataflowVariable()
         def V last = null
         subscribeImpl( source, [onNext: { last = it }, onComplete: {  target.bind(last) }] )
-        session.dag.addOperatorNode('last', source, target)
+        NodeMarker.addOperatorNode('last', source, target)
+        return target
+    }
+
+    static final <V> DataflowReadChannel<V> collect(final DataflowReadChannel<V> source, Closure action=null) {
+        collect(source,Collections.emptyMap(),action)
+    }
+
+    static final <V> DataflowReadChannel<V> collect(final DataflowReadChannel<V> source, Map opts, Closure action=null) {
+        final target = new CollectOp(source,action,opts).apply()
+        NodeMarker.addOperatorNode('collect', source, target)
         return target
     }
 
@@ -804,10 +583,9 @@ class DataflowExtensions {
      * @param source The channel to be converted
      * @return A list holding all the items send over the channel
      */
-    static public final <V> DataflowReadChannel<V> toList(final DataflowReadChannel<V> source) {
-        final target = new DataflowVariable()
-        reduceImpl(source, target, []) { list, item -> list << item }
-        session.dag.addOperatorNode('toList', source, target)
+    static final <V> DataflowReadChannel<V> toList(final DataflowReadChannel<V> source) {
+        final target = ToListOp.apply(source)
+        NodeMarker.addOperatorNode('toList', source, target)
         return target
     }
 
@@ -817,13 +595,13 @@ class DataflowExtensions {
      * @param source The channel to be converted
      * @return A list holding all the items send over the channel
      */
-    static public final <V> DataflowReadChannel<V> toSortedList(final DataflowReadChannel<V> source, Closure closure = null) {
+    static final <V> DataflowReadChannel<V> toSortedList(final DataflowReadChannel<V> source, Closure closure = null) {
         final reduced = new DataflowVariable()
         reduceImpl(source, reduced, []) { list, item -> list << item }
         final target = reduced.then { List list ->
             closure ? list.sort(closure) : list.sort()
         }
-        session.dag.addOperatorNode('toSortedList', source, target)
+        NodeMarker.addOperatorNode('toSortedList', source, target)
         return target as DataflowVariable
     }
 
@@ -834,13 +612,11 @@ class DataflowExtensions {
      * @param value
      * @return
      */
-    static public final DataflowReadChannel<Number> count(final DataflowReadChannel<?> source ) {
-        final target = new DataflowVariable()
-        reduceImpl(source, target, 0) { current, item -> current+1 }
-        session.dag.addOperatorNode('count', source, target)
+    static final DataflowReadChannel<Number> count(final DataflowReadChannel<?> source ) {
+        final target = count0(source, null)
+        NodeMarker.addOperatorNode('count', source, target)
         return target
     }
-
 
     /**
      * Counts the number of occurrences which satisfy the given closure from inside this collection
@@ -849,25 +625,38 @@ class DataflowExtensions {
      * @param criteria
      * @return
      */
-    static public final DataflowReadChannel<Number> count(final DataflowReadChannel<?> source, final Object criteria ) {
-
-        final target = new DataflowVariable()
-        final discriminator = new BooleanReturningMethodInvoker("isCase");
-
-        reduceImpl(source, target, 0) { current, item ->
-            discriminator.invoke(criteria, item) ? current+1 : current
-        }
-
-        session.dag.addOperatorNode('count', source, target)
+    static final DataflowReadChannel<Number> count(final DataflowReadChannel<?> source, final Object criteria ) {
+        final target = count0(source, criteria)
+        NodeMarker.addOperatorNode('count', source, target)
         return target
     }
+
+    private static DataflowVariable count0(DataflowReadChannel<?> source, Object criteria) {
+
+        final target = new DataflowVariable()
+        final discriminator = criteria != null ? new BooleanReturningMethodInvoker("isCase") : null
+
+        if( source instanceof DataflowExpression) {
+            source.whenBound { item ->
+                discriminator == null || discriminator.invoke(criteria, item) ? target.bind(1) : target.bind(0)
+            }
+        }
+        else {
+            reduceImpl(source, target, 0) { current, item ->
+                discriminator == null || discriminator.invoke(criteria, item) ? current+1 : current
+            }
+        }
+
+        return target
+    }
+
 
     /**
      * Groups the items emitted by the source channel into groups determined by the supplied mapping closure and counts the frequency of the created groups
      * @param source The source channel
      * @return A {@code DataflowVariable} returning the a {@code Map} containing the counting values for each key
      */
-    static public final DataflowReadChannel<Map> countBy(final DataflowReadChannel<?> source ) {
+    static final DataflowReadChannel<Map> countBy(final DataflowReadChannel<?> source ) {
         countBy(source, { it })
     }
 
@@ -878,7 +667,7 @@ class DataflowExtensions {
      * @param criteria
      * @return
      */
-    static public final DataflowReadChannel<Map> countBy(final DataflowReadChannel<?> source, final Closure criteria ) {
+    static final DataflowReadChannel<Map> countBy(final DataflowReadChannel<?> source, final Closure criteria ) {
 
         final target = new DataflowVariable()
 
@@ -889,7 +678,7 @@ class DataflowExtensions {
                 return map
         }
 
-        session.dag.addOperatorNode('countBy', source, target)
+        NodeMarker.addOperatorNode('countBy', source, target)
         return target
     }
 
@@ -899,10 +688,10 @@ class DataflowExtensions {
      * @param source The source channel
      * @return A {@code DataflowVariable} returning the minimum value
      */
-    static public final <V> DataflowReadChannel<V> min(final DataflowReadChannel<V> source) {
+    static final <V> DataflowReadChannel<V> min(final DataflowReadChannel<V> source) {
         final target = new DataflowVariable()
         reduceImpl(source, target, null) { min, val -> val<min ? val : min }
-        session.dag.addOperatorNode('min', source, target)
+        NodeMarker.addOperatorNode('min', source, target)
         return target
     }
 
@@ -916,7 +705,7 @@ class DataflowExtensions {
      *      parameter and return a Comparable (typically an Integer) which is then used for further comparison.
      * @return  A {@code DataflowVariable} returning the minimum value
      */
-    static public final <V> DataflowReadChannel<V> min(final DataflowReadChannel<V> source, Closure<V> comparator) {
+    static final <V> DataflowReadChannel<V> min(final DataflowReadChannel<V> source, Closure<V> comparator) {
 
         def action
         if( comparator.getMaximumNumberOfParameters() == 1 ) {
@@ -928,7 +717,7 @@ class DataflowExtensions {
 
         final target = new DataflowVariable()
         reduceImpl(source, target, null, action)
-        session.dag.addOperatorNode('min', source, target)
+        NodeMarker.addOperatorNode('min', source, target)
         return target
     }
 
@@ -939,10 +728,10 @@ class DataflowExtensions {
      * @param comparator The a {@code Comparator} object
      * @return A {@code DataflowVariable} returning the minimum value
      */
-    static public final <V> DataflowReadChannel<V> min(final DataflowQueue<V> source, Comparator comparator) {
+    static final <V> DataflowReadChannel<V> min(final DataflowQueue<V> source, Comparator comparator) {
         final target = new DataflowVariable()
         reduceImpl(source, target, null) { a, b -> comparator.compare(a,b)<0 ? a : b }
-        session.dag.addOperatorNode('min', source, target)
+        NodeMarker.addOperatorNode('min', source, target)
         return target
     }
 
@@ -952,10 +741,10 @@ class DataflowExtensions {
      * @param source The source channel
      * @return A {@code DataflowVariable} emitting the maximum value
      */
-    static public final <V> DataflowReadChannel<V> max(final DataflowQueue source) {
+    static final <V> DataflowReadChannel<V> max(final DataflowQueue source) {
         final target = new DataflowVariable()
         reduceImpl(source,target, null) { max, val -> val>max ? val : max }
-        session.dag.addOperatorNode('max', source, target)
+        NodeMarker.addOperatorNode('max', source, target)
         return target
     }
 
@@ -969,7 +758,7 @@ class DataflowExtensions {
      *  parameter and return a Comparable (typically an Integer) which is then used for further comparison
      * @return A {@code DataflowVariable} emitting the maximum value
      */
-    static public final <V> DataflowReadChannel<V> max(final DataflowQueue<V> source, Closure comparator) {
+    static final <V> DataflowReadChannel<V> max(final DataflowQueue<V> source, Closure comparator) {
 
         def action
         if( comparator.getMaximumNumberOfParameters() == 1 ) {
@@ -984,7 +773,7 @@ class DataflowExtensions {
 
         final target = new DataflowVariable()
         reduceImpl(source, target, null, action)
-        session.dag.addOperatorNode('max', source, target)
+        NodeMarker.addOperatorNode('max', source, target)
         return target
     }
 
@@ -995,10 +784,10 @@ class DataflowExtensions {
      * @param comparator A {@code Comparator} object
      * @return A {@code DataflowVariable} emitting the maximum value
      */
-    static public final <V> DataflowVariable<V> max(final DataflowQueue<V> source, Comparator<V> comparator) {
+    static final <V> DataflowVariable<V> max(final DataflowQueue<V> source, Comparator<V> comparator) {
         final target = new DataflowVariable()
         reduceImpl(source, target, null) { a, b -> comparator.compare(a,b)>0 ? a : b }
-        session.dag.addOperatorNode('max', source, target)
+        NodeMarker.addOperatorNode('max', source, target)
         return target
     }
 
@@ -1009,22 +798,22 @@ class DataflowExtensions {
      * @param closure  A closure that given an entry returns the value to sum
      * @return A {@code DataflowVariable} emitting the final sum value
      */
-    static public final DataflowReadChannel sum(final DataflowQueue source, Closure closure = null) {
+    static final DataflowReadChannel sum(final DataflowQueue source, Closure closure = null) {
 
         def target = new DataflowVariable()
         def aggregate = new Aggregate(name: 'sum', action: closure)
         subscribeImpl(source, [onNext: aggregate.&process, onComplete: { target.bind( aggregate.result ) }])
-        session.dag.addOperatorNode('sum', source, target)
+        NodeMarker.addOperatorNode('sum', source, target)
         return target
     }
 
 
-    static public final DataflowReadChannel mean(final DataflowQueue source, Closure closure = null) {
+    static final DataflowReadChannel mean(final DataflowQueue source, Closure closure = null) {
 
         def target = new DataflowVariable()
         def aggregate = new Aggregate(name: 'mean', action: closure, mean: true)
         subscribeImpl(source, [onNext: aggregate.&process, onComplete: { target.bind( aggregate.result ) }])
-        session.dag.addOperatorNode('mean', source, target)
+        NodeMarker.addOperatorNode('mean', source, target)
         return target
     }
 
@@ -1075,7 +864,7 @@ class DataflowExtensions {
      * @param mapper
      * @return
      */
-    static public final DataflowReadChannel<Map> groupBy(final DataflowReadChannel source, final params = null ) {
+    static final DataflowReadChannel<Map> groupBy(final DataflowReadChannel source, final params = null ) {
 
         int index = 0
         Closure mapper = DEFAULT_MAPPING_CLOSURE
@@ -1100,7 +889,7 @@ class DataflowExtensions {
             return map
         }
 
-        session.dag.addOperatorNode('groupBy', source, target)
+        NodeMarker.addOperatorNode('groupBy', source, target)
         return target
     }
 
@@ -1113,9 +902,10 @@ class DataflowExtensions {
      * @param targets The routing map i.e. a {@code Map} associating each key to the target channel
      * @param mapper A optional mapping function that given an entry return its key
      */
-    static public final void route( final DataflowReadChannel source, Map<?,DataflowWriteChannel> targets, Closure mapper = DEFAULT_MAPPING_CLOSURE ) {
+    static final void route( final DataflowReadChannel source, Map<?,DataflowWriteChannel> targets, Closure mapper = DEFAULT_MAPPING_CLOSURE ) {
+        log.warn "Operator `route` is deprecated -- It will be removed in a future release"
 
-        source.subscribeImpl (
+        DataflowHelper.subscribeImpl(source,
                 [
                         onNext: { value ->
                             def key = mapper ? mapper.call(value) : value
@@ -1134,16 +924,16 @@ class DataflowExtensions {
                 ]
         )
 
-        session.dag.addOperatorNode('route', source, targets.values())
+        NodeMarker.addOperatorNode('route', source, targets.values())
     }
 
-    static public final DataflowReadChannel route( final DataflowReadChannel source, final Closure mapper = DEFAULT_MAPPING_CLOSURE ) {
+    static final DataflowReadChannel route( final DataflowReadChannel source, final Closure mapper = DEFAULT_MAPPING_CLOSURE ) {
         assert !(source instanceof DataflowExpression)
 
-        def allChannels = [:]
+        def allChannels = new ConcurrentHashMap()
         DataflowQueue target = new DataflowQueue()
 
-        source.subscribeImpl (
+        DataflowHelper.subscribeImpl(source,
                 [
                     onNext: { value ->
                         def key = mapper ? mapper.call(value) : value
@@ -1166,18 +956,18 @@ class DataflowExtensions {
                 ]
         )
 
-        session.dag.addOperatorNode('route', source, target)
+        NodeMarker.addOperatorNode('route', source, target)
         return target
     }
 
 
-    static public final DataflowReadChannel spread( final DataflowReadChannel source, Object other ) {
+    static final DataflowReadChannel spread( final DataflowReadChannel source, Object other ) {
 
         final target = new DataflowQueue()
 
         def inputs
         switch(other) {
-            case DataflowQueue: inputs = ((DataflowQueue) other).toList(); break
+            case DataflowQueue: inputs = ToListOp.apply((DataflowQueue)other); break
             case DataflowExpression: inputs = other; break
             case Collection: inputs = Channel.value(other); break
             case (Object[]): inputs = Channel.value(other as List); break
@@ -1208,17 +998,36 @@ class DataflowExtensions {
 
         newOperator(params) { a, b ->
             def proc = ((DataflowProcessor) getDelegate())
-            [ [a], (b as List) ]
+            def left = [a]
+            def right = (b instanceof List ? b : [b])
+            [left, right]
                     .combinations()
                     .each{ Collection it -> proc.bindOutput(it.flatten())  }
         }
 
-        session.dag.addOperatorNode('spread', source, target)
+        def sources = new ArrayList(2)
+        sources.add ( source )
+        sources.add ( other instanceof DataflowChannel ? other : inputs  )
+        NodeMarker.addOperatorNode('spread', sources, target)
         return target
     }
 
+    static final DataflowReadChannel combine( DataflowReadChannel left, Object right ) {
+        combine(left, null, right)
+    }
 
-    static public final DataflowReadChannel flatten( final DataflowReadChannel source )  {
+    static final DataflowReadChannel combine( DataflowReadChannel left, Map params, Object right ) {
+        checkParams('combine', params, [flat:Boolean, by: [List,Integer]])
+
+        final op = new CombineOp(left,right)
+        final sources = op.inputs
+        if( params?.by != null ) op.pivot = params.by
+        final target = op.apply()
+        NodeMarker.addOperatorNode('combine', sources, target)
+        return target
+    }
+
+    static final DataflowReadChannel flatten( final DataflowReadChannel source )  {
 
         final listeners = []
         final target = new DataflowQueue()
@@ -1260,7 +1069,7 @@ class DataflowExtensions {
             }
         }
 
-        session.dag.addOperatorNode('flatten', source, target)
+        NodeMarker.addOperatorNode('flatten', source, target)
         return target
     }
 
@@ -1272,17 +1081,17 @@ class DataflowExtensions {
      * @param closingCriteria A condition that has to be verified to close
      * @return A newly created dataflow queue which emitted the gathered values as bundles
      */
-    static public final <V> DataflowReadChannel<V> buffer( final DataflowReadChannel<V> source, Object closingCriteria ) {
+    static final <V> DataflowReadChannel<V> buffer( final DataflowReadChannel<V> source, Object closingCriteria ) {
 
         def target = new DataflowQueue()
         def closure = new BooleanReturningMethodInvoker("isCase");
-        bufferImpl(source, target, null, { Object it -> closure.invoke(closingCriteria, it) }, false)
+        buffer0(source, target, null, { Object it -> closure.invoke(closingCriteria, it) }, false)
 
-        session.dag.addOperatorNode('buffer', source, target)
+        NodeMarker.addOperatorNode('buffer', source, target)
         return target
     }
 
-    static public final <V> DataflowReadChannel<V> buffer( final DataflowReadChannel<V> source, Object startingCriteria, Object closingCriteria ) {
+    static final <V> DataflowReadChannel<V> buffer( final DataflowReadChannel<V> source, Object startingCriteria, Object closingCriteria ) {
         assert startingCriteria != null
         assert closingCriteria != null
 
@@ -1290,13 +1099,13 @@ class DataflowExtensions {
         def c2 = new BooleanReturningMethodInvoker("isCase");
 
         def target = new DataflowQueue()
-        bufferImpl(source, target, {Object it -> c1.invoke(startingCriteria, it)}, {Object it -> c2.invoke(closingCriteria, it)}, false)
+        buffer0(source, target, {Object it -> c1.invoke(startingCriteria, it)}, {Object it -> c2.invoke(closingCriteria, it)}, false)
 
-        session.dag.addOperatorNode('buffer', source, target)
+        NodeMarker.addOperatorNode('buffer', source, target)
         return target
     }
 
-    static public final <V> DataflowReadChannel<V> buffer( DataflowReadChannel<V> source, Map<String,?> params ) {
+    static final <V> DataflowReadChannel<V> buffer( DataflowReadChannel<V> source, Map<String,?> params ) {
         checkParams( 'buffer', params, 'size','skip','remainder' )
 
         int skip = (int)(params?.skip ?: 0)
@@ -1309,11 +1118,11 @@ class DataflowExtensions {
         final target = new DataflowQueue()
         bufferWithSizeConstraint( source, target, size, skip, remainder )
 
-        session.dag.addOperatorNode('buffer', source, target)
+        NodeMarker.addOperatorNode('buffer', source, target)
         return target
     }
 
-    static private <V> DataflowProcessor bufferWithSizeConstraint( final DataflowReadChannel<V> source, DataflowQueue target, int size, int skip, boolean reminder ) {
+    static <V> DataflowProcessor bufferWithSizeConstraint( final DataflowReadChannel<V> source, DataflowQueue target, int size, int skip, boolean reminder ) {
         assert size>0
 
         int skipCount = 0
@@ -1338,11 +1147,11 @@ class DataflowExtensions {
             return false
         }
 
-        bufferImpl(source, target, skip>0 ? startRule : null, closeRule, reminder )
+        buffer0(source, target, skip>0 ? startRule : null, closeRule, reminder )
     }
 
 
-    static private <V> DataflowProcessor bufferImpl( DataflowReadChannel<V> source, DataflowQueue target, Closure startingCriteria, Closure closeCriteria, boolean remainder ) {
+    static private <V> DataflowProcessor buffer0( DataflowReadChannel<V> source, DataflowQueue target, Closure startingCriteria, Closure closeCriteria, boolean remainder ) {
         assert closeCriteria
 
         // the list holding temporary collected elements
@@ -1388,7 +1197,7 @@ class DataflowExtensions {
         }
     }
 
-    static public final <V> DataflowReadChannel<V> collate( DataflowReadChannel<V> source, int size, boolean keepRemainder = true ) {
+    static final <V> DataflowReadChannel<V> collate( DataflowReadChannel<V> source, int size, boolean keepRemainder = true ) {
         if( size <= 0 ) {
             throw new IllegalArgumentException("Illegal argument 'size' for operator 'collate' -- it must be greater than zero: $size")
         }
@@ -1396,11 +1205,11 @@ class DataflowExtensions {
         final target = new DataflowQueue()
         bufferWithSizeConstraint( source, target, size, 0, keepRemainder )
 
-        session.dag.addOperatorNode('collate', source, target)
+        NodeMarker.addOperatorNode('collate', source, target)
         return target
     }
 
-    static public final <V> DataflowReadChannel<V> collate( DataflowReadChannel<V> source, int size, int step, boolean keepRemainder = true ) {
+    static final <V> DataflowReadChannel<V> collate( DataflowReadChannel<V> source, int size, int step, boolean keepRemainder = true ) {
         if( size <= 0 ) {
             throw new IllegalArgumentException("Illegal argument 'size' for operator 'collate' -- it must be greater than zero: $size")
         }
@@ -1456,7 +1265,7 @@ class DataflowExtensions {
 
         }
 
-        session.dag.addOperatorNode('collate', source, target)
+        NodeMarker.addOperatorNode('collate', source, target)
         return target
     }
 
@@ -1478,13 +1287,13 @@ class DataflowExtensions {
                 onComplete: { if(count.decrementAndGet()==0) { target << Channel.STOP } }
         ]
 
-        subscribeImpl(source, handlers)
-        others.each{ it.subscribeImpl(handlers) }
+        DataflowHelper.subscribeImpl(source, handlers)
+        others.each{ DataflowHelper.subscribeImpl(it, handlers) }
 
         def allSources = [source]
         allSources.addAll(others)
 
-        session.dag.addOperatorNode('mix', allSources, target)
+        NodeMarker.addOperatorNode('mix', allSources, target)
         return target
     }
 
@@ -1504,7 +1313,7 @@ class DataflowExtensions {
                         .setOpts(opts)
                         .apply()
 
-        session.dag.addOperatorNode('phase', [source, other], target)
+        NodeMarker.addOperatorNode('phase', [source, other], target)
         return target
     }
 
@@ -1514,7 +1323,7 @@ class DataflowExtensions {
                         .setMapper(mapper)
                         .apply()
 
-        session.dag.addOperatorNode('phase', [source, other], target)
+        NodeMarker.addOperatorNode('phase', [source, other], target)
         return target
     }
 
@@ -1531,7 +1340,7 @@ class DataflowExtensions {
      * @return
      */
 
-    public static Closure DEFAULT_MAPPING_CLOSURE = { obj, int index=0 ->
+    static Closure DEFAULT_MAPPING_CLOSURE = { obj, int index=0 ->
 
         switch( obj ) {
 
@@ -1568,13 +1377,13 @@ class DataflowExtensions {
     }
 
 
-    public static <T> DataflowReadChannel cross( DataflowReadChannel source, DataflowReadChannel other, Closure mapper = null ) {
+    static <T> DataflowReadChannel cross( DataflowReadChannel source, DataflowReadChannel other, Closure mapper = null ) {
 
         def target = new CrossOp(source, other)
                     .setMapper(mapper)
                     .apply()
 
-        session.dag.addOperatorNode('cross', [source,other], target)
+        NodeMarker.addOperatorNode('cross', [source,other], target)
         return target
     }
 
@@ -1593,7 +1402,7 @@ class DataflowExtensions {
         def allSources = [source]
         if(others) allSources.addAll(others)
 
-        session.dag.addOperatorNode('concat', allSources, target)
+        NodeMarker.addOperatorNode('concat', allSources, target)
         return target
     }
 
@@ -1608,40 +1417,40 @@ class DataflowExtensions {
      */
     static void separate( DataflowReadChannel source, final DataflowWriteChannel... outputs ) {
         new SeparateOp(source, outputs as List<DataflowWriteChannel>).apply()
-        session.dag.addOperatorNode('separate', source, outputs)
+        NodeMarker.addOperatorNode('separate', source, outputs)
     }
 
     static void separate(final DataflowReadChannel source, final List<DataflowWriteChannel<?>> outputs) {
         new SeparateOp(source, outputs).apply()
-        session.dag.addOperatorNode('separate', source, outputs)
+        NodeMarker.addOperatorNode('separate', source, outputs)
     }
 
     static void separate(final DataflowReadChannel source, final List<DataflowWriteChannel<?>> outputs, final Closure<List<Object>> code) {
         new SeparateOp(source, outputs, code).apply()
-        session.dag.addOperatorNode('separate', source, outputs)
+        NodeMarker.addOperatorNode('separate', source, outputs)
     }
 
-    static public final List<DataflowReadChannel> separate( final DataflowReadChannel source, int n ) {
+    static final List<DataflowReadChannel> separate( final DataflowReadChannel source, int n ) {
         def outputs = new SeparateOp(source, n).apply()
-        session.dag.addOperatorNode('separate', source, outputs)
+        NodeMarker.addOperatorNode('separate', source, outputs)
         return outputs
     }
 
-    static public final List<DataflowReadChannel> separate( final DataflowReadChannel source, int n, Closure mapper  ) {
+    static final List<DataflowReadChannel> separate( final DataflowReadChannel source, int n, Closure mapper  ) {
         def outputs = new SeparateOp(source, n, mapper).apply()
-        session.dag.addOperatorNode('separate', source, outputs)
+        NodeMarker.addOperatorNode('separate', source, outputs)
         return outputs
     }
 
 
     static final void into( DataflowReadChannel source, final DataflowWriteChannel... targets ) {
         new IntoOp(source, targets as List<DataflowWriteChannel>).apply()
-        session.dag.addOperatorNode('into', source, targets)
+        NodeMarker.addOperatorNode('into', source, targets)
     }
 
-    static public final List<DataflowReadChannel> into( final DataflowReadChannel source, int n ) {
+    static final List<DataflowReadChannel> into( final DataflowReadChannel source, int n ) {
         def outputs = new IntoOp(source,n).apply().getOutputs()
-        session.dag.addOperatorNode('into', source, outputs)
+        NodeMarker.addOperatorNode('into', source, outputs)
         return outputs
     }
 
@@ -1661,7 +1470,7 @@ class DataflowExtensions {
      */
     static void into( DataflowReadChannel source, Closure holder ) {
         def outputs = new IntoOp(source,holder).apply().getOutputs()
-        session.dag.addOperatorNode('into', source, outputs)
+        NodeMarker.addOperatorNode('into', source, outputs)
     }
 
 
@@ -1682,13 +1491,13 @@ class DataflowExtensions {
      */
     static DataflowReadChannel tap( final DataflowReadChannel source, final Closure holder ) {
         def tap = new TapOp(source, holder).apply()
-        session.dag.addOperatorNode('tap', source, tap.outputs)
+        NodeMarker.addOperatorNode('tap', source, tap.outputs)
         return (DataflowReadChannel)tap.result
     }
 
     static DataflowReadChannel tap( final DataflowReadChannel source, final DataflowWriteChannel target ) {
         def tap = new TapOp(source, target).apply()
-        session.dag.addOperatorNode('tap', source, tap.outputs)
+        NodeMarker.addOperatorNode('tap', source, tap.outputs)
         return (DataflowReadChannel)tap.result
     }
 
@@ -1724,24 +1533,22 @@ class DataflowExtensions {
      * @param value The value to emit when the source channel is empty. If a closure is used the the value returned by its invocation is used.
      * @return The resulting channel emitting the source items or the default value when the channel is empty
      */
-    static public DataflowReadChannel ifEmpty( DataflowReadChannel source, value ) {
+    static DataflowReadChannel ifEmpty( DataflowReadChannel source, value ) {
 
         boolean empty = true
-        def result = newChannelBy(source)
-        subscribeImpl(source, [
-                onNext: { result.bind(it); empty=false },
-                onComplete: {
-                    if(empty) {
-                        if( value instanceof Closure )
-                            result.bind(value.call())
-                        else
-                            result.bind(value)
-                    }
-                    result.bind(Channel.STOP)
-                }]
-        )
+        final result = newChannelBy(source)
+        final singleton = result instanceof DataflowExpression
+        final next = { result.bind(it); empty=false }
+        final complete = {
+            if(empty)
+                result.bind( value instanceof Closure ? value() : value )
+            if( !singleton )
+                result.bind(Channel.STOP)
+        }
 
-        session.dag.addOperatorNode('ifEmpty', source, result)
+        subscribeImpl(source, [onNext: next, onComplete: complete])
+
+        NodeMarker.addOperatorNode('ifEmpty', source, result)
         return result
     }
 
@@ -1750,9 +1557,9 @@ class DataflowExtensions {
      * @param source
      * @param closure
      */
-    static public void print(final DataflowReadChannel<?> source, Closure closure = null) {
+    static void print(final DataflowReadChannel<?> source, Closure closure = null) {
         subscribeImpl(source, [onNext: { System.out.print( closure ? closure.call(it) : it ) }])
-        session.dag.addOperatorNode('print', source, null)
+        NodeMarker.addOperatorNode('print', source, null)
     }
 
     /**
@@ -1760,9 +1567,9 @@ class DataflowExtensions {
      * @param source
      * @param closure
      */
-    static public void println(final DataflowReadChannel<?> source, Closure closure = null) {
+    static void println(final DataflowReadChannel<?> source, Closure closure = null) {
         subscribeImpl(source, [onNext: { System.out.println( closure ? closure.call(it) : it ) }])
-        session.dag.addOperatorNode('println', source, null)
+        NodeMarker.addOperatorNode('println', source, null)
     }
 
 
@@ -1775,13 +1582,12 @@ class DataflowExtensions {
      * @param closure
      * @return
      */
-    static public final <V> DataflowReadChannel<V> view(final DataflowReadChannel<?> source, Map opts, Closure closure = null) {
+    static final <V> DataflowReadChannel<V> view(final DataflowReadChannel<?> source, Map opts, Closure closure = null) {
         assert source != null
         checkParams('view', opts, PARAMS_VIEW)
         final newLine = opts.newLine != false
 
         final target = newChannelBy(source);
-        final isChannel = !(target instanceof DataflowExpression)
 
         final printHandle = newLine ? System.out.&println : System.out.&print
 
@@ -1794,18 +1600,18 @@ class DataflowExtensions {
                         },
 
                 onComplete: {
-                    if(isChannel) target.bind(Channel.STOP)
+                    target.close()
                 }
         ]
 
         subscribeImpl(source,apply)
 
-        session.dag.addOperatorNode('view', source, target)
+        NodeMarker.addOperatorNode('view', source, target)
         return target;
 
     }
 
-    static public final <V> DataflowReadChannel<V> view(final DataflowReadChannel<?> source, Closure closure = null) {
+    static final <V> DataflowReadChannel<V> view(final DataflowReadChannel<?> source, Closure closure = null) {
         view(source, [:], closure)
     }
 
@@ -1819,12 +1625,12 @@ class DataflowExtensions {
         def itr = values.iterator()
         while( itr.hasNext() ) target.bind(itr.next())
         target.bind(Channel.STOP)
-        session.dag.addSourceNode('channel',target)
+        NodeMarker.addSourceNode('channel',target)
         return target
     }
 
     @Deprecated
-    static public DataflowBroadcast broadcast( DataflowReadChannel source ) {
+    static DataflowBroadcast broadcast( DataflowReadChannel source ) {
         log.warn("Operator `broadcast` is deprecated -- It will be removed in a future release")
         def result = new DataflowBroadcast()
         source.into(result)
@@ -1840,22 +1646,26 @@ class DataflowExtensions {
         if( source instanceof DataflowQueue ) {
             source.bind(Channel.STOP)
         }
+        else if( source instanceof DataflowExpression ) {
+            if( !source.isBound() )
+                source.bind(Channel.STOP)
+        }
         else {
-            log.warn "Operation `close` can only be applied to a queue channel"
+            log.warn "Operator `close` cannot be applied to channels of type: ${source?.class?.simpleName}"
         }
         return source
     }
 
     static <T> void choice(final DataflowReadChannel source, final List<DataflowWriteChannel<T>> outputs, final Closure<Integer> code) {
         new ChoiceOp(source,outputs,code).apply()
-        session.dag.addOperatorNode('choice', source, outputs)
+        NodeMarker.addOperatorNode('choice', source, outputs)
     }
 
     static <V> DataflowReadChannel<V> merge(final DataflowReadChannel<V> source, final DataflowReadChannel<V> other, final Closure<V> closure) {
         final result = newChannelBy(source)
         final inputs = [source, other]
         newOperator(inputs, [result], new ChainWithClosure(closure))
-        session.dag.addOperatorNode('merge', inputs, result)
+        NodeMarker.addOperatorNode('merge', inputs, result)
         return result;
     }
 
@@ -1865,8 +1675,44 @@ class DataflowExtensions {
         inputs.add(source);
         inputs.addAll(others);
         newOperator(inputs, [result], new ChainWithClosure(closure));
-        session.dag.addOperatorNode('merge', inputs, result)
+        NodeMarker.addOperatorNode('merge', inputs, result)
         return result;
+    }
+
+    static <V> DataflowReadChannel<V> randomSample(final DataflowReadChannel source, int n) {
+        assert !(source instanceof DataflowExpression)
+
+        final result = new RandomSampleOp(source,n).apply()
+        NodeMarker.addOperatorNode('randomSample', source, result)
+        return result;
+    }
+
+    static <V> DataflowReadChannel<V> toInteger(final DataflowReadChannel source) {
+        final DataflowReadChannel<V> target = newChannelBy(source)
+        newOperator(source, target, new ChainWithClosure<V>({ it -> it as Integer }))
+        NodeMarker.addOperatorNode('toInteger', source, target)
+        return target;
+    }
+
+    static <V> DataflowReadChannel<V> toLong(final DataflowReadChannel source) {
+        final DataflowReadChannel<V> target = newChannelBy(source)
+        newOperator(source, target, new ChainWithClosure<V>({ it -> it as Long }))
+        NodeMarker.addOperatorNode('toLong', source, target)
+        return target;
+    }
+
+    static <V> DataflowReadChannel<V> toFloat(final DataflowReadChannel source) {
+        final DataflowReadChannel<V> target = newChannelBy(source)
+        newOperator(source, target, new ChainWithClosure<V>({ it -> it as Float }))
+        NodeMarker.addOperatorNode('toFloat', source, target)
+        return target;
+    }
+
+    static <V> DataflowReadChannel<V> toDouble(final DataflowReadChannel source) {
+        final DataflowReadChannel<V> target = newChannelBy(source)
+        newOperator(source, target, new ChainWithClosure<V>({ it -> it as Double }))
+        NodeMarker.addOperatorNode('toDouble', source, target)
+        return target;
     }
 
 }

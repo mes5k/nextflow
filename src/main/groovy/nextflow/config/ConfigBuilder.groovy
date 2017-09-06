@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,7 +19,6 @@
  */
 
 package nextflow.config
-
 import static nextflow.util.ConfigHelper.parseValue
 
 import java.nio.file.Path
@@ -242,6 +241,9 @@ class ConfigBuilder {
         final slurper = new ComposedConfigSlurper()
         ConfigObject result = slurper.parse('env{}; session{}; params{}; process{}; executor{} ')
 
+        if( cmdRun?.params )
+            slurper.setParams(cmdRun.parsedParams)
+
         // add the user specified environment to the session env
         env.sort().each { name, value -> result.env.put(name,value) }
 
@@ -313,8 +315,9 @@ class ConfigBuilder {
         if( !uniqueId )
             return null
 
-        if( uniqueId == 'last' ) {
-            uniqueId = HistoryFile.history.retrieveLastUniqueId()
+        if( uniqueId == 'last' || uniqueId == 'true' ) {
+            uniqueId = HistoryFile.DEFAULT.getLast()?.sessionId
+
             if( !uniqueId ) {
                 log.warn "It seems you never run this project before -- Option `-resume` is ignored"
             }
@@ -324,24 +327,28 @@ class ConfigBuilder {
     }
 
     @PackageScope
-    void configRunOptions(ConfigObject config, CmdRun cmdRun) {
+    void configRunOptions(ConfigObject config, Map env, CmdRun cmdRun) {
 
         // -- set config options
         config.cacheable = cmdRun.cacheable
+
+        // -- set the run name
+        if( cmdRun.runName )
+            config.runName = cmdRun.runName
 
         // -- sets the working directory
         if( cmdRun.workDir )
             config.workDir = cmdRun.workDir
 
         else if( !config.workDir )
-            config.workDir = System.getenv('NXF_WORK') ?: 'work'
+            config.workDir = env.get('NXF_WORK') ?: 'work'
 
         // -- sets the library path
         if( cmdRun.libPath )
             config.libDir = cmdRun.libPath
 
         else if ( !config.libDir )
-            config.libDir = System.getenv('NXF_LIB')
+            config.libDir = env.get('NXF_LIB')
 
         // -- override 'process' parameters defined on the cmd line
         cmdRun.process.each { name, value ->
@@ -354,6 +361,10 @@ class ConfigBuilder {
 
         if( config.isSet('resume') )
             config.resume = normalizeResumeId(config.resume as String)
+
+        // -- sets `dumpKeys` option
+        if( cmdRun.dumpHashes )
+            config.dumpHashes = cmdRun.dumpHashes
 
         // -- other configuration parameters
         if( cmdRun.poolSize ) {
@@ -412,9 +423,8 @@ class ConfigBuilder {
 
 
         // -- add the command line parameters to the 'taskConfig' object
-        cmdRun.params?.each { name, value ->
-            config.params.put(name, parseValue(value))
-        }
+        if( cmdRun.params || cmdRun.paramsFile )
+            config.params.putAll( cmdRun.parsedParams )
 
         if( cmdRun.withoutDocker && config.docker instanceof Map ) {
             // disable docker execution
@@ -423,25 +433,36 @@ class ConfigBuilder {
         }
 
         if( cmdRun.withDocker ) {
-            log.debug "Enabling execution in Docker container as requested by cli option `-with-docker ${cmdRun.withDocker}`"
-            if( !config.containsKey('docker') )
-                config.docker = [:]
-            if( !(config.docker instanceof Map) )
-                throw new AbortOperationException("Invalid `docker` definition in the config file")
-
-            config.docker.enabled = true
-            if( cmdRun.withDocker != '-' ) {
-                // this is supposed to be a docker image name
-                config.process.container = cmdRun.withDocker
-            }
-            else if( config.docker.image ) {
-                config.process.container = config.docker.image
-            }
-
-            if( !hasContainerDirective(config.process) )
-                throw new AbortOperationException("You have requested to run with Docker but no image were specified")
-
+            configContainer(config, 'docker', cmdRun.withDocker)
         }
+
+        if( cmdRun.withSingularity ) {
+            configContainer(config, 'singularity', cmdRun.withSingularity)
+        }
+    }
+
+    private void configContainer(ConfigObject config, String engine, def cli) {
+        log.debug "Enabling execution in ${engine.capitalize()} container as requested by cli option `-with-$engine ${cmdRun.withDocker}`"
+
+        if( !config.containsKey(engine) )
+            config.put(engine, [:])
+
+        if( !(config.get(engine) instanceof Map) )
+            throw new AbortOperationException("Invalid `$engine` definition in the config file")
+
+        def containerConfig = (Map)config.get(engine)
+        containerConfig.enabled = true
+        if( cli != '-' ) {
+            // this is supposed to be a docker image name
+            config.process.container = cli
+        }
+        else if( containerConfig.image ) {
+            config.process.container = containerConfig.image
+        }
+
+        if( !hasContainerDirective(config.process) )
+            throw new AbortOperationException("You have requested to run with ${engine.capitalize()} but no image were specified")
+
     }
 
     /**
@@ -471,25 +492,17 @@ class ConfigBuilder {
     /**
      * @return A the application options hold in a {@code ConfigObject} instance
      */
-    ConfigObject build() {
+    Map build() {
 
         // -- configuration file(s)
         def configFiles = validateConfigFiles(options?.config)
         def config = buildConfig(configFiles)
 
         if( cmdRun )
-            configRunOptions(config, cmdRun)
+            configRunOptions(config, System.getenv(), cmdRun)
 
-        return config
+        return config.toMap()
     }
 
-    /**
-     * @param options The command line {@link CliOptions} object
-     * @param currentPath The current working path where the file `nextflow.config` is eventually located
-     * @return The resulting config {@link ConfigObject} object
-     */
-    static ConfigObject defaultConfig() {
-        new ConfigBuilder() .build()
-    }
 
 }

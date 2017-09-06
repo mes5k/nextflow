@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -22,16 +22,14 @@ package nextflow.extension
 
 import java.nio.file.Path
 import java.util.concurrent.locks.Lock
-import java.util.concurrent.locks.ReentrantLock
 import java.util.regex.Pattern
 
-import com.google.common.cache.Cache
-import com.google.common.cache.CacheBuilder
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import nextflow.file.FileHelper
 import nextflow.util.CheckHelper
 import nextflow.util.Duration
+import nextflow.file.FileMutex
 import nextflow.util.MemoryUnit
 import org.apache.commons.lang.StringUtils
 import org.codehaus.groovy.runtime.DefaultGroovyMethods
@@ -54,6 +52,19 @@ class Bolts {
     static private Pattern PATTERN_RIGHT_TRIM = ~/\s+$/
 
     static private Pattern PATTERN_LEFT_TRIM = ~/^\s+/
+
+    static List pairs(Map self, Map opts=null) {
+        def flat = opts?.flat == true
+        def result = []
+        for( Map.Entry entry : self.entrySet() ) {
+            if( flat && entry.value instanceof Collection )
+                entry.value.iterator().each { result << [entry.key, it] }
+            else
+                result << [entry.key, entry.value]
+        }
+
+        return result
+    }
 
     /**
      * Remove the left side after a dot (including it) e.g.
@@ -329,6 +340,59 @@ class Bolts {
         }
     }
 
+    /**
+     * Creates a file system wide lock that prevent two or more JVM instances/process
+     * to work on the same file
+     *
+     * Note: this does not protected against multiple-thread accessing the file in a
+     * concurrent manner.
+     *
+     * @param
+     *      self The file over which define the lock
+     * @param
+     *      timeout An option timeout elapsed which the a {@link InterruptedException} is thrown
+     * @param
+     *      closure The action to apply during the lock file spawn
+     * @return
+     *      The user provided {@code closure} result
+     *
+     * @throws
+     *      InterruptedException if the lock cannot be acquired within the specified {@code timeout}
+     */
+    static withLock(File self, Duration timeout = null, Closure closure) {
+        def locker = new FileMutex(self)
+        if( timeout )
+            locker.setTimeout(timeout)
+        locker.lock(closure)
+    }
+
+
+    /**
+     * Creates a file system wide lock that prevent two or more JVM instances/process
+     * to work on the same file
+     *
+     * Note: this does not protected against multiple-thread accessing the file in a
+     * concurrent manner.
+     *
+     * @param
+     *      self The file over which define the lock
+     * @param
+     *      timeout An option timeout elapsed which the a {@link InterruptedException} is thrown
+     * @param
+     *      closure The action to apply during the lock file spawn
+     * @return
+     *      The user provided {@code closure} result
+     *
+     * @throws
+     *      InterruptedException if the lock cannot be acquired within the specified {@code timeout}
+     */
+    static withLock( Path self, Duration timeout, Closure closure ) {
+        def locker = new FileMutex(self.toFile())
+        if( timeout )
+            locker.setTimeout(timeout)
+        locker.lock(closure)
+    }
+
 
     /**
      * Converts a {@code String} to a {@code Duration} object
@@ -405,14 +469,12 @@ class Bolts {
     }
 
 
-    private static Lock MAP_LOCK = new ReentrantLock()
-
     static def <T> T getOrCreate( Map self, key, factory ) {
 
         if( self.containsKey(key) )
             return (T)self.get(key)
 
-        withLock(MAP_LOCK) {
+        synchronized (self) {
             if( self.containsKey(key) )
                 return (T)self.get(key)
 
@@ -465,6 +527,21 @@ class Bolts {
     static Map toMap( ConfigObject config ) {
         assert config != null
         (Map)normalize0((Map)config)
+    }
+
+    static ConfigObject toConfigObject(Map self) {
+
+        def result = new ConfigObject()
+        self.each { key, value ->
+            if( value instanceof Map ) {
+                result.put( key, toConfigObject((Map)value) )
+            }
+            else {
+                result.put( key, value )
+            }
+        }
+
+        return result
     }
 
     static private normalize0( config ) {
@@ -638,32 +715,34 @@ class Bolts {
         return result
     }
 
-    private static HashMap<String,Long> LOGGER_CACHE = new LinkedHashMap<String,Long>() {
-        protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+    private static HashMap<Object,Long> LOGGER_CACHE = new LinkedHashMap<Object,Long>() {
+        protected boolean removeEldestEntry(Map.Entry<Object, Long> eldest) {
             return size() > 10_000
         }
     }
 
     private static final Duration LOG_DFLT_THROTTLE = Duration.of('1min')
 
-    static private checkLogCache( Object msg, Map params, Closure action ) {
+    static synchronized private checkLogCache( Object msg, Map params, Closure action ) {
 
         // -- check if this message has already been printed
         final String str = msg.toString()
         final Throwable error = params?.causedBy as Throwable
         final Duration throttle = params?.throttle as Duration ?: LOG_DFLT_THROTTLE
+        final firstOnly = params?.firstOnly == true
+        final key = params?.cacheKey ?: str
 
         long now = System.currentTimeMillis()
-        Long ts = LOGGER_CACHE.get(str)
-        if( ts && now - ts <= throttle.toMillis() ) {
+        Long ts = LOGGER_CACHE.get(key)
+        if( ts && (now - ts <= throttle.toMillis() || firstOnly) ) {
             return
         }
-        LOGGER_CACHE.put(str, now)
+        LOGGER_CACHE.put(key, now)
 
         action.call(str, error)
     }
 
-    private static Map<String,?> LOGGER_PARAMS = [ causedBy: Throwable, throttle: [String, Number, Duration]  ]
+    private static Map<String,?> LOGGER_PARAMS = [ cacheKey: Object, causedBy: Throwable, throttle: [String, Number, Duration], firstOnly: Boolean ]
 
 
     /**

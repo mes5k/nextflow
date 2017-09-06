@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -27,8 +27,15 @@ package nextflow.processor
  */
 enum ErrorStrategy {
 
-    TERMINATE,  // on error, terminate gracefully
-    IGNORE,     // on error, ignore it an go-on
-    RETRY       // on error, retry
+    TERMINATE(false),    // on error, terminate the pipeline execution killing all pending and running tasks
+    FINISH(false),       // on error, terminate the pipeline execution awaiting for previously submitted task to complete
+    IGNORE(true),       // on error, ignore it an go-on
+    RETRY(true);        // on error, retry
+
+    final boolean soft
+
+    ErrorStrategy(boolean soft) {
+        this.soft = soft
+    }
 
 }

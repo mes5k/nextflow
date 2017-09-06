@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -32,6 +32,8 @@ import nextflow.processor.TaskMonitor
 import nextflow.processor.TaskPollingMonitor
 import nextflow.processor.TaskRun
 import nextflow.util.Duration
+import nextflow.util.ServiceName
+
 /**
  * Executor for ClusterK Cirrus scheduler
  *
@@ -41,6 +43,7 @@ import nextflow.util.Duration
  */
 
 @Slf4j
+@Deprecated
 @ServiceName('cirrus')
 class CirrusExecutor extends AbstractGridExecutor {
 
@@ -160,7 +163,7 @@ class CirrusExecutor extends AbstractGridExecutor {
     }
 
     @Override
-    protected String getKillCommand() { 'kancel' }
+    protected List<String> getKillCommand() { ['kancel'] }
 
     @Override
     protected List<String> queueStatusCommand( queue ) {
@@ -177,7 +180,7 @@ class CirrusExecutor extends AbstractGridExecutor {
      *  3        3      3       -1      DONE    102400  102400  204800  0       default ["/bin/ls"]       0
      */
     @Override
-    protected Map<?, QueueStatus> parseQueueStatus(String text) {
+    protected Map<String, QueueStatus> parseQueueStatus(String text) {
         def result = [:]
         text.eachLine { String row, index ->
             if( index< 1 ) return
@@ -206,8 +209,7 @@ class CirrusTaskHandler extends GridTaskHandler {
 
         // -- log the qsub command
         def cli = executor.getSubmitCommandLine(task, wrapperFile)
-        if( log.isTraceEnabled())
-            log.trace "start process ${task.name} > cli: ${cli}"
+        log.trace "start process ${task.name} > cli: ${cli}"
 
         /*
          * launch 'sub' script wrapper

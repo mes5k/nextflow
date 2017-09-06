@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,6 +19,8 @@
  */
 
 package nextflow.trace
+
+import java.nio.file.Path
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 
@@ -26,7 +28,9 @@ import groovy.transform.CompileStatic
 import groovy.transform.Memoized
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
+import nextflow.processor.TaskId
 import nextflow.util.Duration
+import nextflow.util.KryoHelper
 import nextflow.util.MemoryUnit
 /**
   * This object represent holds the information of a single process run,
@@ -36,7 +40,17 @@ import nextflow.util.MemoryUnit
   */
 @Slf4j
 @CompileStatic
-class TraceRecord {
+class TraceRecord implements Serializable {
+
+    public static String WORKDIR = 'folder'
+
+    public TraceRecord() {
+        this.store = [:]
+    }
+
+    private TraceRecord(Map store) {
+        this.store = store
+    }
 
     final private static String DEFAULT_DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS"
 
@@ -72,10 +86,13 @@ class TraceRecord {
             syscw:      'num',      // -- /proc/$pid/io
             read_bytes: 'mem',      // -- /proc/$pid/io
             write_bytes:'mem',      // -- /proc/$pid/io
-            attempt:    'num'
+            attempt:    'num',
+            workdir:    'str',
+            script:     'str',
+            scratch:    'str'
     ]
 
-    static Map<String,Closure<String>> FORMATTER = [
+    static public Map<String,Closure<String>> FORMATTER = [
             str: this.&fmtString,
             num: this.&fmtNumber,
             date: this.&fmtDate,
@@ -224,7 +241,7 @@ class TraceRecord {
 
 
     @PackageScope
-    Map<String,Object> store = [:]
+    Map<String,Object> store
 
     @Memoized
     def Set<String> keySet() {
@@ -285,7 +302,7 @@ class TraceRecord {
      * @param converter A converter string
      * @return A string value formatted according the specified converter
      */
-    String get( String name, String converter ) {
+    String getFmtStr( String name, String converter = null ) {
         assert name
         def val = store.get(name)
 
@@ -320,7 +337,9 @@ class TraceRecord {
         }
     }
 
-    def getTaskId() { get('task_id') }
+    TaskId getTaskId() { (TaskId)get('task_id') }
+
+    String getWorkDir() { get('workdir') }
 
     /**
      * Render the specified list of fields to a single string value
@@ -335,7 +354,7 @@ class TraceRecord {
         for( int i=0; i<fields.size(); i++ ) {
             String name = fields[i]
             String format = i<formats?.size() ? formats[i] : null
-            result << (get(name, format) ?: NA)
+            result << (getFmtStr(name, format) ?: NA)
         }
 
         return result.join(separator)
@@ -358,8 +377,9 @@ class TraceRecord {
      *
      */
 
-    TraceRecord parseTraceFile( String text ) {
+    TraceRecord parseTraceFile( Path file ) {
 
+        final text = file.text
         String[] header = null
         final lines = text.readLines()
         for( int count=0; count<lines.size(); count++ ) {
@@ -382,10 +402,10 @@ class TraceRecord {
                     final name = header[i]
                     if( i==2 || i==3 ) {
                         // fields '%cpu' and '%mem' are expressed as percent value
-                        this.put(name, values[i].toInteger() / 10F)
+                        this.put(name, parseInt(values[i], file, i) / 10F)
                     }
                     else if( i>3 ) {
-                        def val = values[i].toLong()
+                        def val = parseLong(values[i], file, i)
                         // fields from index 4 to 7 (vmem,rss,peak_vmem, peak_rss) are provided in KB, so they are normalized to bytes
                         if( i<8 ) val *= 1024
                         this.put(name, val)
@@ -410,6 +430,26 @@ class TraceRecord {
         return this
     }
 
+    private long parseInt( String str, Path file, int index )  {
+        try {
+            str.toInteger()
+        }
+        catch( NumberFormatException e ) {
+            log.debug "[WARN] Not a valid integer number `$str` -- offending column: $index in file `$file`"
+            return 0
+        }
+    }
+
+    private long parseLong( String str, Path file, int index )  {
+        try {
+            str.toLong()
+        }
+        catch( NumberFormatException e ) {
+            log.debug "[WARN] Not a valid long number `$str` -- offending column: $index in file `$file`"
+            return 0
+        }
+    }
+
     @Override
     boolean equals( Object that ) {
         if ( this.is(that) ) return true
@@ -420,6 +460,26 @@ class TraceRecord {
     @Override
     int hashCode() {
         store.hashCode()
+    }
+
+    byte[] serialize() {
+        KryoHelper.serialize(store)
+    }
+
+    static TraceRecord deserialize(byte[] buffer) {
+        Map map = (Map)KryoHelper.deserialize(buffer)
+        new TraceRecord(map)
+    }
+
+    TraceRecord setCached(boolean value) {
+        if( value ) {
+            store.status = 'CACHED'
+        }
+        return this
+    }
+
+    boolean isCached() {
+        store.status == 'CACHED'
     }
 
 }

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2016, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2016, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -21,22 +21,23 @@
 package nextflow.processor
 import groovy.util.logging.Slf4j
 import nextflow.Session
-import nextflow.executor.CirrusExecutor
+import nextflow.executor.CondorExecutor
 import nextflow.executor.CrgExecutor
 import nextflow.executor.Executor
-import nextflow.executor.CondorExecutor
+import nextflow.executor.KubernetesExecutor
 import nextflow.executor.LocalExecutor
 import nextflow.executor.LsfExecutor
 import nextflow.executor.NopeExecutor
 import nextflow.executor.PbsExecutor
-import nextflow.executor.ServiceName
 import nextflow.executor.SgeExecutor
 import nextflow.executor.SlurmExecutor
 import nextflow.executor.SupportedScriptTypes
+import nextflow.executor.NqsiiExecutor
 import nextflow.script.BaseScript
 import nextflow.script.ScriptType
 import nextflow.script.TaskBody
 import nextflow.util.ServiceDiscover
+import nextflow.util.ServiceName
 /**
  *  Factory class for {@TaskProcessor} instances
  *
@@ -45,7 +46,7 @@ import nextflow.util.ServiceDiscover
 @Slf4j
 class ProcessFactory {
 
-    static String DEFAULT_EXECUTOR = System.getenv('NXF_EXECUTOR') ?: 'local'
+    static public String DEFAULT_EXECUTOR = System.getenv('NXF_EXECUTOR') ?: 'local'
 
     /*
      * Map the executor class to its 'friendly' name
@@ -62,7 +63,8 @@ class ProcessFactory {
             'crg': CrgExecutor,
             'bsc': LsfExecutor,
             'condor': CondorExecutor,
-            'cirrus': CirrusExecutor
+            'k8s': KubernetesExecutor,
+            'nqsii': NqsiiExecutor
     ]
 
     private final Session session
@@ -100,7 +102,7 @@ class ProcessFactory {
      * @return An instance of {@link TaskProcessor}
      */
     protected TaskProcessor newTaskProcessor( String name, Executor executor, Session session, BaseScript script, ProcessConfig config, TaskBody taskBody ) {
-        new ParallelTaskProcessor(name, executor, session, script, config, taskBody)
+        new TaskProcessor(name, executor, session, script, config, taskBody)
     }
 
     /**
@@ -199,7 +201,21 @@ class ProcessFactory {
         // -- set 'default' properties defined in the configuration file in the 'process' section
         if( config.process instanceof Map ) {
             config.process .each { String key, value ->
-                if( key.startsWith('$')) return
+                if( key.startsWith('$'))
+                    return
+                if( !ProcessConfig.DIRECTIVES.contains(key) )
+                    log.warn "Unknown directive `$key` for process `$name`"
+                if( key == 'params' ) // <-- patch issue #242
+                    return
+                if( key == 'ext' && processConfig.getProperty('ext') instanceof Map ) {
+                    // update missing 'ext' properties found in 'process' scope
+                    def ext = processConfig.getProperty('ext') as Map
+                    value.each { String k, v ->
+                        if( !ext.containsKey(k) )
+                            ext[k] = v
+                    }
+                    return
+                }
                 processConfig.put(key,value)
             }
         }
@@ -252,8 +268,6 @@ class ProcessFactory {
      * @param taskConfig
      */
     private getExecutorName(ProcessConfig taskConfig) {
-        log.trace ">> taskConfig $taskConfig"
-
         // create the processor object
         def result = taskConfig.executor?.toString()
 

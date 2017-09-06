@@ -1,11 +1,11 @@
 .. _config-page:
 
-*******************
+*************
 Configuration
-*******************
+*************
 
 Configuration file
-===================
+==================
 
 When a pipeline script is launched Nextflow looks for a file named ``nextflow.config`` in the current directory and
 in the script base directory (if it is not the same as the current directory). Finally it checks for the file
@@ -36,7 +36,7 @@ as the number one, while the latter is interpreted as a string value.
 
 
 Config Variables
---------------------
+----------------
 
 Configuration properties can be used as variables in the configuration file itself, by using the usual
 ``$propertyName`` or ``${expression}`` syntax.
@@ -72,7 +72,7 @@ a single line or ``/*`` .. ``*/`` to comment a block on multiple lines.
 
 
 Config include
----------------
+--------------
 
 A configuration file can include one or more configuration files using the keyword ``includeConfig``. For example::
 
@@ -86,7 +86,7 @@ When a relative path is used, it is resolved against the actual location of the 
 
 
 Config scopes
-==============
+=============
 
 Configuration settings can be organized in different scopes by dot prefixing the property names with a scope
 identifier or grouping the properties in the same scope using the curly brackets notation. This is shown in the
@@ -103,7 +103,7 @@ following example::
 
 
 Scope `env`
--------------
+-----------
 
 The ``env`` scope allows you to define one or more environment variables that will be exported to the system environment
 where pipeline processes need to be executed.
@@ -122,7 +122,7 @@ Simply prefix your variable names with the ``env`` scope or surround them by cur
 
 
 Scope `params`
-----------------
+--------------
 
 The ``params`` scope allows you to define parameters that will be accessible in the pipeline script. Simply prefix the
 parameter names with the ``params`` scope or surround them by curly brackets, as shown below::
@@ -142,7 +142,7 @@ parameter names with the ``params`` scope or surround them by curly brackets, as
 .. _config-process:
 
 Scope `process`
-----------------
+---------------
 
 The ``process`` configuration scope allows you to provide the default configuration for the processes in your pipeline.
 
@@ -183,7 +183,7 @@ When using the curly brackets notation, the above can be written as shown below:
 .. _config-executor:
 
 Scope `executor`
-------------------
+----------------
 
 The ``executor`` configuration scope allows you to set the optional executor settings, listed in the following table.
 
@@ -195,10 +195,14 @@ queueSize             The number of tasks the executor will handle in a parallel
 pollInterval          Determines how often a poll occurs to check for a process termination.
 dumpInterval          Determines how often the executor status is written in the application log file (default: ``5min``).
 queueStatInterval     Determines how often the queue status is fetched from the cluster system. This setting is used only by grid executors (default: ``1min``).
-exitReadTimeout       Determines how long the executor waits before return an error status when a process is terminated but the `exit` file does not exist or it is empty. This setting is used only by grid executors (default: ``90sec``).
+exitReadTimeout       Determines how long the executor waits before return an error status when a process is terminated but the `exit` file does not exist or it is empty. This setting is used only by grid executors (default: ``270 sec``).
 killBatchSize         Determines the number of jobs that can be `killed` in a single command execution (default: ``100``).
 perJobMemLimit        Specifies Platform LSF *per-job* memory limit mode. See :ref:`lsf-executor`.
+jobName               Determines the name of jobs submitted to the underlying cluster executor e.g. ``executor.jobName = { "$task.name - $task.hash" }`` .
+cpus                  The maximum number of CPUs made available by the underlying system (only used by the ``local`` executor).
+memory                The maximum amount of memory made available by the underlying system (only used by the ``local`` executor).
 ===================== =====================
+
 
 
 The executor settings can be defined as shown below::
@@ -220,24 +224,22 @@ the executor name with the symbol ``$`` and using it as special scope identifier
     }
 
     $local {
-        queueSize = 20
-        pollInterval = '1sec'
+        cpus = 8
+        memory = '32 GB'
     }
   }
 
 The above configuration example can be rewritten using the dot notation as shown below::
 
-  executor.$sge.queueSize = 100
-  executor.$sge.pollInterval = '30sec'
-  executor.$local.queueSize = 10
-  executor.$local.pollInterval = '1sec'
-
-
+    executor.$sge.queueSize = 100
+    executor.$sge.pollInterval = '30sec'
+    executor.$local.cpus = 8
+    executor.$local.memory = '32 GB'
 
 .. _config-docker:
 
 Scope `docker`
----------------
+--------------
 
 The ``docker`` configuration scope controls how `Docker <http://www.docker.io>`_ containers are executed by Nextflow.
 
@@ -273,10 +275,33 @@ brackets, as shown below::
 Read :ref:`docker-page` page to lean more how use Docker containers with Nextflow.
 
 
+.. _config-singularity:
+
+Scope `singularity`
+-------------------
+
+The ``singularity`` configuration scope controls how `Singularity <http://singularity.lbl.gov>`_ containers are executed
+by Nextflow.
+
+The following settings are available:
+
+================== ================
+Name                Description
+================== ================
+enabled             Turn this flag to ``true`` to enable Singularity execution (default: ``false``).
+engineOptions       This attribute can be used to provide any option supported by the Singularity engine i.e. ``singularity [OPTIONS]``.
+runOptions          This attribute can be used to provide any extra command line options supported by the ``singularity exec``.
+autoMounts          When ``true`` Nextflow automatically mounts host paths in the executed contained. It requires the `user bind control` feature enabled in your Singularity installation (default: ``false``).
+cacheDir            The directory where remote Singularity images are stored. When using a computing cluster it must be a shared folder accessible to all computing nodes.
+================== ================
+
+
+Read :ref:`singularity-page` page to lean more how use Singularity containers with Nextflow.
+
 .. _config-manifest:
 
 Scope `manifest`
------------------
+----------------
 
 The ``manifest`` configuration scope allows you to define some meta-data information needed when publishing your
 pipeline project on GitHub, BitBucket or GitLab.
@@ -308,7 +333,7 @@ documentation page.
 .. _config-trace:
 
 Scope `trace`
---------------
+-------------
 
 The ``trace`` scope allows you to control the layout of the execution trace file generated by Nextflow.
 
@@ -339,7 +364,7 @@ To learn more about the execution report that can be generated by Nextflow read 
 .. _config-aws:
 
 Scope `aws`
-------------
+-----------
 
 The ``aws`` scope allows you to configure the access to Amazon S3 storage. Use the attributes ``accessKey`` and ``secretKey``
 to specify your bucket credentials. For example::
@@ -348,6 +373,7 @@ to specify your bucket credentials. For example::
     aws {
         accessKey = '<YOUR S3 ACCESS KEY>'
         secretKey = '<YOUR S3 SECRET KEY>'
+        region = '<REGION IDENTIFIER>'
     }
 
 Click the following link to lean more about `AWS Security Credentials <http://docs.aws.amazon.com/general/latest/gr/aws-security-credentials.html>`_.
@@ -387,8 +413,55 @@ For example::
     }
 
 
+.. _config-cloud:
+
+Scope `cloud`
+-------------
+
+The ``cloud`` scope allows you to define the settings of the computing cluster that can be deployed in the cloud
+by Nextflow.
+
+The following settings are available:
+
+=========================== ================
+Name                        Description
+=========================== ================
+bootStorageSize             Boot storage volume size e.g. ``10 GB``.
+imageId                     Identifier of the virtual machine(s) to launch e.g. ``ami-43f49030``.
+instanceType                Type of the virtual machine(s) to launch e.g. ``m4.xlarge``.
+instanceStorageMount        Instance ephemeral storage mount path e.g. ``/mnt/scratch``.
+instanceStorageDevice       Instance ephemeral storage device name e.g. ``/dev/xvdc``.
+keyName                     SSH access key name given by the cloud provider.
+keyHash                     SSH access public key hash string.
+keyFile                     SSH access public key file path.
+securityGroup               Identifier of the security group to be applied e.g. ``sg-df72b9ba``.
+sharedStorageId             Identifier of the shared file system instance e.g. ``fs-1803efd1``.
+sharedStorageMount          Mount path of the shared file system e.g. ``/mnt/efs``.
+subnetId                    Identifier of the VPC subnet to be applied e.g. ``subnet-05222a43``.
+spotPrice                   Price bid for spot/preemptive instances.
+userName                    SSH access user name (don't specify it to use the image default user name).
+autoscale                   See below.
+=========================== ================
+
+The autoscale configuration group provides the following settings:
+
+=========================== ================
+Name                        Description
+=========================== ================
+enabled                     Enable cluster auto-scaling.
+terminateWhenIdle           Enable cluster automatic scale-down i.e. instance terminations when idle.
+idleTimeout                 Amount of time in idle state after which an instance is candidate to be terminated.
+starvingTimeout             Amount of time after which one ore more tasks pending for execution trigger an auto-scale request.
+minInstances                Minimum number of instances in the cluster.
+maxInstances                Maximum number of instances in the cluster.
+imageId                     Identifier of the virtual machine(s) to launch when new instances are added to the cluster.
+instanceType                Type of the virtual machine(s) to launch when new instances are added to the cluster.
+spotPrice                   Price bid for spot/preemptive instances launched while auto-scaling the cluster.
+=========================== ================
+
+
 Scope `timeline`
------------------
+----------------
 
 The ``timeline`` scope allows you to enable/disable the processes execution timeline report generated by Nextflow.
 
@@ -403,7 +476,7 @@ file                Timeline file name (default: ``timeline.html``).
 
 
 Config profiles
-================
+===============
 
 Configuration files can contain the definition of one or more *profiles*. A profile is a set of configuration attributes
 that can be activated/chosen when launching a pipeline execution by using the ``-profile`` command line option.
@@ -438,28 +511,30 @@ when no other profile is specified by the user.
 
 
 Environment variables
-======================
+=====================
 
 The following environment variables control the configuration of the Nextflow runtime and
 the Java virtual machine used by it.
 
-================== ================
-Name                Description
-================== ================
-NXF_HOME            Nextflow home directory (default: ``$HOME/.nextflow``).
-NXF_VER             Defines what version of Nextflow to use.
-NXF_ORG             Default `organization` prefix when looking for a hosted repository (default: ``nextflow-io``).
-NXF_GRAB            Provides extra runtime dependencies downloaded from a Maven repository service.
-NXF_OPTS            Provides extra options for the Java and Nextflow runtime. It must be a blank separated list of ``-Dkey[=value]`` properties.
-NXF_CLASSPATH       Allows to extend the Java runtime classpath with extra jar files or class folders.
-NXF_DRMAA           Defines the Java DRMAA binding library to be used. It can be specified as a jar file location or a Maven coordinate.
-NXF_ASSETS          Defined the directory where downloaded pipeline repositories are stored (default: ``$NXF_HOME/assets``)
-NXF_PID_FILE        Name of the file where the process PID is saved when Nextflow is launched in background.
-NXF_WORK            Directory where working files are stored (usually your *scratch* directory)
-NXF_TEMP            Directory where temporary files are stored
-NXF_DEBUG           Defines scripts debugging level: ``1`` dump task environment variables in the task log file; ``2`` enables command script execution tracing; ``3`` enables command wrapper execution tracing.
-JAVA_HOME           Path location of the Java VM installation used to run Nextflow.
-JAVA_CMD            Path location of the Java binary command used to launch  Nextflow.
-HTTP_PROXY          Defines the HTTP proxy server
-HTTPS_PROXY         Defines the HTTPS proxy server
-================== ================
+=========================== ================
+Name                        Description
+=========================== ================
+NXF_HOME                    Nextflow home directory (default: ``$HOME/.nextflow``).
+NXF_VER                     Defines what version of Nextflow to use.
+NXF_ORG                     Default `organization` prefix when looking for a hosted repository (default: ``nextflow-io``).
+NXF_GRAB                    Provides extra runtime dependencies downloaded from a Maven repository service.
+NXF_OPTS                    Provides extra options for the Java and Nextflow runtime. It must be a blank separated list of ``-Dkey[=value]`` properties.
+NXF_CLASSPATH               Allows to extend the Java runtime classpath with extra jar files or class folders.
+NXF_DRMAA                   Defines the Java DRMAA binding library to be used. It can be specified as a jar file location or a Maven coordinate.
+NXF_ASSETS                  Defined the directory where downloaded pipeline repositories are stored (default: ``$NXF_HOME/assets``)
+NXF_PID_FILE                Name of the file where the process PID is saved when Nextflow is launched in background.
+NXF_WORK                    Directory where working files are stored (usually your *scratch* directory)
+NXF_TEMP                    Directory where temporary files are stored
+NXF_DEBUG                   Defines scripts debugging level: ``1`` dump task environment variables in the task log file; ``2`` enables command script execution tracing; ``3`` enables command wrapper execution tracing.
+NXF_EXECUTOR                Defines the default process executor e.g. `sge`
+NXF_SINGULARITY_CACHEDIR    Directory where remote Singularity images are stored. When using a computing cluster it must be a shared folder accessible to all computing nodes.
+JAVA_HOME                   Path location of the Java VM installation used to run Nextflow.
+JAVA_CMD                    Path location of the Java binary command used to launch  Nextflow.
+HTTP_PROXY                  Defines the HTTP proxy server
+HTTPS_PROXY                 Defines the HTTPS proxy server
+=========================== ================
