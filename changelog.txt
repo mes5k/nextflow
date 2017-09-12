@@ -1,6 +1,16 @@
 NEXTFLOW CHANGE-LOG
 ===================
 
+0.25.7 - 6 Sep 2017
+- Fixed Unable to parse the AWS price list API #444
+- Added seed parameter to `randomSample` operator #410
+
+0.25.6 - 13 Aug 2017 
+- Fixed Empty channel waiting forever when viewed and mixed #428
+- Fixed Error Channels cannot be used as input in more than one process or operator #429
+- Fixed Script body is resolved even if the `when` guard evaluate to false
+- Added queue process directive as option for trace file
+
 0.25.5 - 4 Aug 2017
 - Fixed NF fails to pull images hosted in the Singularity Hub #414
 - Added `-y` to cloud create command to skip confirmation request
@@ -529,7 +539,7 @@ NEXTFLOW CHANGE-LOG
 0.13.3 - 19 Apr 2015 
 - Fixed issue when staging file when using a non local pipeline workdir
 - Fixed invalid values in the trace file returned by `awk`
-- Removed unnecessary `S3Path` serialiser registation on DnaNexus executor initialisation
+- Removed unnecessary `S3Path` serialiser registration on DnaNexus executor initialisation
 - Updated S3 file system client to version 0.2.8g
 
 0.13.2 - 16 Apr 2015
@@ -847,7 +857,7 @@ NEXTFLOW CHANGE-LOG
 0.5.1 - 24 Oct 2013
 - Major executors refactoring
 - Featuring new single-thread tasks scheduler
-- New enhanced DLS syntax with extended semantic
+- New enhanced DSL syntax with extended semantic
 - Switched file handling to new NIO.2 file system
 - Introducing support for DNAnexus cloud platform
 - Removed unnecessary library dependencies
@@ -946,7 +956,7 @@ NEXTFLOW CHANGE-LOG
 0.2.1 - 3 Apr 2013
 - Initial support for SGE/OGE grid engine
 
-0.2.0 - 2 Apr 2012
+0.2.0 - 2 Apr 2013
 - General improvement
 - Enhanced parameters handling
 - 'chunkLines' and 'chunkFasta' API extension
