@@ -142,9 +142,12 @@ class TaskDispatcher {
         final monitor = getMonitor(executor)
         final handler = executor.createTaskHandler(task)
 
-        // set a count down latch if the execution is blocking
-        if( awaitTermination )
-            handler.latch = new CountDownLatch(1)
+// create composite task that aggregates "batch" number of tasks and then submits
+// the composite instead of individual tasks
+
+//        // set a count down latch if the execution is blocking
+//        if( awaitTermination )
+//            handler.latch = new CountDownLatch(1)
 
         /*
          * Add the task to the queue for processing
@@ -152,11 +155,11 @@ class TaskDispatcher {
          * there's not space *put* operation will block until, some other tasks finish
          */
         monitor.schedule(handler)
-        if( handler && handler.latch ) {
-            log.trace "Process ${task} > blocking"
-            handler.latch.await()
-            log.trace "Process ${task} > complete"
-        }
+//        if( handler && handler.latch ) {
+//            log.trace "Process ${task} > blocking"
+//            handler.latch.await()
+//            log.trace "Process ${task} > complete"
+//        }
     }
 
 }
