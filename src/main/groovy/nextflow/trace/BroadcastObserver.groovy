@@ -92,4 +92,10 @@ class BroadcastObserver implements TraceObserver {
         broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
     }
 
+    @Override
+    void onProcessCached(TaskHandler handler) {
+        def msg = "{'type': 'process_cached', 'name': '${handler.task.name}'}"
+        broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
+    }
+
 }
