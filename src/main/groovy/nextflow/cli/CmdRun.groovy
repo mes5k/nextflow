@@ -194,7 +194,6 @@ class CmdRun extends CmdBase implements HubOptions {
         checkRunName()
 
         log.info "N E X T F L O W  ~  version ${Const.APP_VER}"
-        log.info "with broadcast: ${withBroadcast}"
 
         // -- specify the arguments
         def scriptArgs = (args?.size()>1 ? args[1..-1] : []) as List<String>
