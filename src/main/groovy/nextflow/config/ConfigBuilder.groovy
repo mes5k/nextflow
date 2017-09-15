@@ -43,6 +43,7 @@ import nextflow.util.HistoryFile
 class ConfigBuilder {
 
     static final public DEFAULT_PROFILE = 'standard'
+    static final public DEFAULT_BROADCAST_PORT = 9092
 
     CliOptions options
 
@@ -401,8 +402,12 @@ class ConfigBuilder {
             if( !(config.broadcast instanceof Map) )
                 config.broadcast = [:]
             config.broadcast.enabled = true
-            if( !config.broadcast.file )
-                config.broadcast.file = cmdRun.withBroadcast
+            try {
+                int port = Integer.parseInt(cmdRun.withBroadcast)
+                config.broadcast.port = port
+            } catch (NumberFormatException ex) {
+                config.broadcast.port = DEFAULT_BROADCAST_PORT
+            }
         }
 
         // -- sets DAG report options

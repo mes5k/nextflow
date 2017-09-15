@@ -43,11 +43,11 @@ class BroadcastObserver implements TraceObserver {
     private final SocketIOServer server;
     private final BroadcastOperations broadcast;
 
-    BroadcastObserver( /* int port */ ) {
+    BroadcastObserver( int port ) {
         log.info 'Constructing Broadcast observer'
         Configuration config = new Configuration();
         config.setHostname('localhost');
-        config.setPort(9092);
+        config.setPort(port);
 
         server = new SocketIOServer(config);
         broadcast = server.getBroadcastOperations();

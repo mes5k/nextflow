@@ -347,8 +347,9 @@ class Session implements ISession {
      */
     protected void createBroadcastObserver(Collection<TraceObserver> result) {
         Boolean isEnabled = config.navigate('broadcast.enabled') as Boolean
+        Integer port = config.navigate('broadcast.port') as Integer
         if( isEnabled ) {
-            def observer = new BroadcastObserver()
+            def observer = new BroadcastObserver(port)
             result << observer
         }
     }
