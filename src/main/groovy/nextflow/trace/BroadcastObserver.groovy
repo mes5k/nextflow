@@ -53,49 +53,46 @@ class BroadcastObserver implements TraceObserver {
         broadcast = server.getBroadcastOperations();
     }
 
-    @Override
-    void onFlowStart(Session session) {
-        server.start();
-        def msg = "{'type': 'flow_start', 'name': 'pipeline'}"
+    private void send(msg) {
         broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
     }
 
     @Override
+    void onFlowStart(Session session) {
+        server.start();
+        send("{'type': 'flow_start', 'name': 'pipeline'}")
+    }
+
+    @Override
     void onFlowComplete() {
-        def msg = "{'type': 'flow_stop', 'name': 'pipeline'}"
-        broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
+        send("{'type': 'flow_stop', 'name': 'pipeline'}")
         server.stop();
     }
 
     @Override
     void onProcessCreate(TaskProcessor process) {
-        def msg = "{'type': 'process_create', 'name': '${process.getName()}'}"
-        broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
+        send("{'type': 'process_create', 'name': '${process.getName()}'}")
     }
 
 
     @Override
     void onProcessSubmit(TaskHandler handler) {
-        def msg = "{'type': 'process_submit', 'name': '${handler.task.name}' }"
-        broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
+        send("{'type': 'process_submit', 'name': '${handler.task.name}' }")
     }
 
     @Override
     void onProcessStart(TaskHandler handler) {
-        def msg = "{'type': 'process_start', 'name': '${handler.task.name}'}"
-        broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
+        send("{'type': 'process_start', 'name': '${handler.task.name}'}")
     }
 
     @Override
     void onProcessComplete(TaskHandler handler) {
-        def msg = "{'type': 'process_complete', 'name': '${handler.task.name}'}"
-        broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
+        send("{'type': 'process_complete', 'name': '${handler.task.name}'}")
     }
 
     @Override
     void onProcessCached(TaskHandler handler) {
-        def msg = "{'type': 'process_cached', 'name': '${handler.task.name}'}"
-        broadcast.sendEvent( "message", msg.replaceAll("'",'"'));
+        send("{'type': 'process_cached', 'name': '${handler.task.name}'}")
     }
 
 }
