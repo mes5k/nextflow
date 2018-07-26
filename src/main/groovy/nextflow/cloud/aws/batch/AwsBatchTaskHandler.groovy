@@ -133,6 +133,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
 
         new AwsOptions(
                 cliPath: executor.getSession().getExecConfigProp(name,'awscli',null) as String,
+                containerMounts: executor.getSession().getExecConfigProp(name,'mounts',null) as Map,
                 storageClass: executor.getSession().config.navigate('aws.client.uploadStorageClass') as String,
                 storageEncryption: executor.getSession().config.navigate('aws.client.storageEncryption') as String,
                 remoteBinDir: executor.remoteBinDir as String,
@@ -378,6 +379,11 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
                 .withCommand('true')
                 .withMemory(1024)
                 .withVcpus(1)
+
+        def mountPoints = []
+        def volumes = []
+
+        // add mount for AWS CLI
         def awscli = getAwsOptions().cliPath
         if( awscli ) {
             def mountName = 'aws-cli'
@@ -386,14 +392,37 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
                     .withSourceVolume(mountName)
                     .withContainerPath(path)
                     .withReadOnly(true)
-            container.setMountPoints([mount])
+            mountPoints << mount
 
             def vol = new Volume()
                     .withName(mountName)
                     .withHost(new Host()
                     .withSourcePath(path))
-            container.setVolumes([vol])
+            volumes << vol
         }
+
+        // Add any additional mounts for the container
+        def mounts = getAwsOptions().containerMounts
+        if( mounts ) {
+            mounts.each {
+                def mountName = it.name
+                def mount = new MountPoint()
+                        .withSourceVolume(mountName)
+                        .withContainerPath(it.containerPath)
+                        .withReadOnly(it.readOnly)
+                mountPoints << mount
+
+                def vol = new Volume()
+                        .withName(mountName)
+                        .withHost(new Host()
+                            .withSourcePath(it.hostPath))
+                volumes << vol
+            }
+        }
+
+        container.setMountPoints(mountPoints)
+        container.setVolumes(volumes)
+
         result.setContainerProperties(container)
 
         // create a job marker uuid
