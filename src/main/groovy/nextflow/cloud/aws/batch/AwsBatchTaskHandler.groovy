@@ -404,6 +404,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
         def mounts = task.config.getProperty('batchContainerMounts')
         if( mounts ) {
             mounts.each {
+		log.info "got ${it.name} mount"
                 def mountName = it.name
                 def mount = new MountPoint()
                         .withSourceVolume(mountName)
@@ -417,7 +418,9 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
                             .withSourcePath(it.hostPath))
                 volumes << vol
             }
-        }
+        } else {
+		log.info "no batch mounts!!!"
+	}
 
         container.setMountPoints(mountPoints)
         container.setVolumes(volumes)
