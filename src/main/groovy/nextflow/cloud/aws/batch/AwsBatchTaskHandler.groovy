@@ -428,7 +428,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
         result.setContainerProperties(container)
 
         // create a job marker uuid
-        def uuid = CacheHelper.hasher([name, image, awscli]).hash().toString()
+        def uuid = CacheHelper.hasher([name, image, mountPoints.toString()]).hash().toString()
         result.setParameters(['nf-token':uuid])
 
         return result
