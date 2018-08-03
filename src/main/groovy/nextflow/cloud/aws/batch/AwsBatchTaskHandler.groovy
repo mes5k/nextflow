@@ -330,7 +330,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
             return container.substring(17)
         }
 
-        def mounts = task?.config?.getProperty('batchContainerMounts')
+        def mounts = task?.getConfig().getProperty('batchContainerMounts')
 
         resolveJobDefinition(container, mounts)
     }
@@ -420,7 +420,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
                 def vol = new Volume()
                         .withName(mountName)
                         .withHost(new Host()
-                            .withSourcePath(it.hostPath))
+                        .withSourcePath(it.hostPath))
                 volumes << vol
             }
         }
