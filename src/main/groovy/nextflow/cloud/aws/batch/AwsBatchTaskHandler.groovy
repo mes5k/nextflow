@@ -330,7 +330,9 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
             return container.substring(17)
         }
 
-        resolveJobDefinition(container, task)
+        def mounts = task?.config?.getProperty('batchContainerMounts')
+
+        resolveJobDefinition(container, mounts)
     }
 
     /**
@@ -339,7 +341,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
      * @param container The Docker container image name which need to be used to run the job
      * @return The Batch Job Definition name associated with the specified container
      */
-    protected String resolveJobDefinition(String container, TaskRun task) {
+    protected String resolveJobDefinition(String container, List mounts = []) {
         if( jobDefinitions.containsKey(container) )
             return jobDefinitions[container]
 
@@ -349,7 +351,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
             if( jobDefinitions.containsKey(container) )
                 return jobDefinitions[container]
 
-            def req = makeJobDefRequest(container, task)
+            def req = makeJobDefRequest(container, mounts)
             def name = findJobDef(req.jobDefinitionName, req.parameters?.'nf-token')
             if( name ) {
                 log.debug "[AWS BATCH] Found job definition name=$name; container=$container"
@@ -370,7 +372,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
      * @param image The Docker container image for which is required to create a Batch job definition
      * @return An instance of {@link com.amazonaws.services.batch.model.RegisterJobDefinitionRequest} for the specified Docker image
      */
-    protected RegisterJobDefinitionRequest makeJobDefRequest(String image, TaskRun task) {
+    protected RegisterJobDefinitionRequest makeJobDefRequest(String image, List mounts = []) {
         final name = normalizeJobDefinitionName(image)
         final result = new RegisterJobDefinitionRequest()
         result.setJobDefinitionName(name)
@@ -406,7 +408,6 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
         }
 
         // Add any additional mounts for the container
-        def mounts = task.config.getProperty('batchContainerMounts')
         if( mounts ) {
             mounts.each {
                 def mountName = it.name
@@ -424,8 +425,8 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
             }
         }
 
-	log.debug "[AWS BATCH] container mount points: " + mountPoints.toString()
-	log.debug "[AWS BATCH] container volumes: " + volumes.toString()
+    log.debug "[AWS BATCH] container mount points: " + mountPoints.toString()
+    log.debug "[AWS BATCH] container volumes: " + volumes.toString()
 
         container.setMountPoints(mountPoints)
         container.setVolumes(volumes)
