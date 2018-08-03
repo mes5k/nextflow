@@ -341,7 +341,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
      * @param container The Docker container image name which need to be used to run the job
      * @return The Batch Job Definition name associated with the specified container
      */
-    protected String resolveJobDefinition(String container, List mounts = []) {
+    protected String resolveJobDefinition(String container, List mounts = null) {
         if( jobDefinitions.containsKey(container) )
             return jobDefinitions[container]
 
@@ -372,7 +372,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
      * @param image The Docker container image for which is required to create a Batch job definition
      * @return An instance of {@link com.amazonaws.services.batch.model.RegisterJobDefinitionRequest} for the specified Docker image
      */
-    protected RegisterJobDefinitionRequest makeJobDefRequest(String image, List mounts = []) {
+    protected RegisterJobDefinitionRequest makeJobDefRequest(String image, List mounts = null) {
         final name = normalizeJobDefinitionName(image)
         final result = new RegisterJobDefinitionRequest()
         result.setJobDefinitionName(name)
@@ -425,8 +425,8 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
             }
         }
 
-    log.debug "[AWS BATCH] container mount points: " + mountPoints.toString()
-    log.debug "[AWS BATCH] container volumes: " + volumes.toString()
+        log.debug "[AWS BATCH] container mount points: " + mountPoints.toString()
+        log.debug "[AWS BATCH] container volumes: " + volumes.toString()
 
         container.setMountPoints(mountPoints)
         container.setVolumes(volumes)
