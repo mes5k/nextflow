@@ -67,7 +67,6 @@ class ProcessConfig implements Map<String,Object> {
             'cpus',
             'container',
             'containerOptions',
-            'batchContainerMounts',
             'cleanup',
             'clusterOptions',
             'disk',
