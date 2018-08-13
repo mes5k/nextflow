@@ -298,7 +298,6 @@ class AwsBatchTaskHandlerTest extends Specification {
         given:
         def IMAGE = 'user/image:tag'
         def JOB_NAME = 'nf-user-image-tag'
-        def MNT1= [name:'efs', containerPath:'/efs', hostPath:'/mnt/efs']
         def handler = Spy(AwsBatchTaskHandler)
         def task = Mock(TaskRun)
 
@@ -313,8 +312,7 @@ class AwsBatchTaskHandlerTest extends Specification {
         result = handler.getJobDefinition(task)
         then:
         1 * task.getContainer() >> IMAGE
-        1 * task.getConfig() >> new TaskConfig(batchContainerMounts: [MNT1])
-        1 * handler.resolveJobDefinition(IMAGE,[MNT1]) >> JOB_NAME
+        1 * handler.resolveJobDefinition(IMAGE) >> JOB_NAME
         result == JOB_NAME
 
     }
@@ -356,8 +354,6 @@ class AwsBatchTaskHandlerTest extends Specification {
     def 'should validate job validation method' () {
         given:
         def IMAGE = 'foo/bar:1.0'
-        def IMAGE2 = 'foo/bar:2.0'
-        def MNT1= [name:'efs', containerPath:'/efs', hostPath:'/mnt/efs']
         def JOB_NAME = 'nf-foo-bar-1-0'
         def JOB_ID= '123'
         def handler = Spy(AwsBatchTaskHandler)
@@ -367,7 +363,7 @@ class AwsBatchTaskHandlerTest extends Specification {
         when:
         handler.resolveJobDefinition(IMAGE)
         then:
-        1 * handler.makeJobDefRequest(IMAGE, null) >> req
+        1 * handler.makeJobDefRequest(IMAGE) >> req
         1 * req.getJobDefinitionName() >> JOB_NAME
         1 * req.getParameters() >> [ 'nf-token': JOB_ID ]
         1 * handler.findJobDef(JOB_NAME, JOB_ID) >> null
@@ -377,18 +373,10 @@ class AwsBatchTaskHandlerTest extends Specification {
         handler.resolveJobDefinition(IMAGE)
         then:
         // second time are not invoked for the same image
-        0 * handler.makeJobDefRequest(IMAGE, null) >> req
+        0 * handler.makeJobDefRequest(IMAGE) >> req
         0 * handler.findJobDef(JOB_NAME, JOB_ID) >> null
         0 * handler.createJobDef(req) >> null
 
-        when:
-        handler.resolveJobDefinition(IMAGE2, [MNT1])
-        then:
-        1 * handler.makeJobDefRequest(IMAGE2, , [MNT1]) >> req
-        1 * req.getJobDefinitionName() >> JOB_NAME
-        1 * req.getParameters() >> [ 'nf-token': JOB_ID ]
-        1 * handler.findJobDef(JOB_NAME, JOB_ID) >> null
-        1 * handler.createJobDef(req) >> null
     }
 
     def 'should verify job definition existence' () {
@@ -496,10 +484,10 @@ class AwsBatchTaskHandlerTest extends Specification {
         result.containerProperties.volumes[0].name == 'aws-cli'
 
         when:
-        result = handler.makeJobDefRequest(IMAGE, [MNT1]) // just one extra mount
+        result = handler.makeJobDefRequest(IMAGE) // just one extra mount
         then:
         1 * handler.normalizeJobDefinitionName(IMAGE) >> JOB_NAME
-        1 * handler.getAwsOptions() >> new AwsOptions(cliPath: '/home/conda/bin/aws')
+        1 * handler.getAwsOptions() >> new AwsOptions(cliPath: '/home/conda/bin/aws', batchContainerMounts: [MNT1])
         result.jobDefinitionName == JOB_NAME
         result.type == 'container'
         result.parameters.'nf-token' == '7eddd7058c04f974d0c20bf24149cf59'
@@ -517,10 +505,10 @@ class AwsBatchTaskHandlerTest extends Specification {
         result.containerProperties.volumes[1].name == 'efs'
 
         when:
-        result = handler.makeJobDefRequest(IMAGE, [MNT1, MNT2]) // more than one extra mount
+        result = handler.makeJobDefRequest(IMAGE) // more than one extra mount
         then:
         1 * handler.normalizeJobDefinitionName(IMAGE) >> JOB_NAME
-        1 * handler.getAwsOptions() >> new AwsOptions(cliPath: '/home/conda/bin/aws')
+        1 * handler.getAwsOptions() >> new AwsOptions(cliPath: '/home/conda/bin/aws', batchContainerMounts: [MNT1, MNT2])
         result.jobDefinitionName == JOB_NAME
         result.type == 'container'
         result.parameters.'nf-token' == 'faf98e378343bf02afb6134f4ab541c0'
