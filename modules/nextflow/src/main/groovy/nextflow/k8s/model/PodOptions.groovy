@@ -20,7 +20,6 @@ import groovy.transform.CompileStatic
 import groovy.transform.EqualsAndHashCode
 import groovy.transform.PackageScope
 import groovy.transform.ToString
-import groovy.util.logging.Slf4j
 
 /**
  * Model K8s pod options such as environment variables,
@@ -31,7 +30,6 @@ import groovy.util.logging.Slf4j
 @CompileStatic
 @ToString(includeNames = true)
 @EqualsAndHashCode(includeFields = true)
-@Slf4j
 class PodOptions {
 
     private String imagePullPolicy
@@ -74,7 +72,6 @@ class PodOptions {
 
     @PackageScope void create(Map<String,String> entry) {
         String me = entry.toString()
-        log.info "create spec entry:  $me"
 
         if( entry.env && entry.value ) {
             envVars << PodEnv.value(entry.env, entry.value)
@@ -116,11 +113,9 @@ class PodOptions {
             this.annotations.put(entry.annotation as String, entry.value as String)
         }
         else if( entry.specExtras instanceof Map ) {
-            log.info "got spec extras"
             this.specExtras = new PodSpecExtras(entry.specExtras as Map)
-            log.info this.specExtras.toString()
         }
-        else 
+        else
             throw new IllegalArgumentException("Unknown pod options: $entry")
     }
 

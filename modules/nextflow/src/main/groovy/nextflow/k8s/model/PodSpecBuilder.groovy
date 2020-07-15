@@ -255,12 +255,8 @@ class PodSpecBuilder {
             securityContext = opts.securityContext
         if( opts.nodeSelector )
             nodeSelector = opts.nodeSelector
-        if( opts.specExtras ) {
-            log.info "got spec extras from option"
+        if( opts.specExtras )
             specExtras = opts.getSpecExtras()
-        } else {
-            log.info "NO spec extras from option"
-        }
 
         return this
     }
@@ -313,13 +309,8 @@ class PodSpecBuilder {
                 containers: [ container ],
         ]
 
-        if ( specExtras ) {
+        if ( specExtras )
             spec << specExtras.toSpec()
-            String xy = spec.toString()
-            log.info "just spec: $xy"
-        } else {
-            log.info "no spec extras!"
-        }
 
         if( nodeSelector )
             spec.nodeSelector = nodeSelector.toSpec()
@@ -408,9 +399,6 @@ class PodSpecBuilder {
             spec.volumes = volumes
         if( mounts )
             container.volumeMounts = mounts
-
-        String sss = pod.toString()
-        log.info "pod spec: $sss"
 
         return pod
     }
