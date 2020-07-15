@@ -27,6 +27,7 @@ import nextflow.k8s.client.K8sClient
 import nextflow.k8s.client.K8sResponseException
 import nextflow.k8s.model.PodOptions
 import nextflow.k8s.model.PodSecurityContext
+import nextflow.k8s.model.PodSpecExtras
 import nextflow.k8s.model.PodVolumeClaim
 /**
  * Model Kubernetes specific settings defined in the nextflow
@@ -65,6 +66,9 @@ class K8sConfig implements Map<String,Object> {
             podOptions.securityContext = new PodSecurityContext(target.runAsUser)
         else if( target.securityContext instanceof Map )
             podOptions.securityContext = new PodSecurityContext(target.securityContext as Map)
+
+        if( target.specExtras instanceof Map )
+            podOptions.specExtras = new PodSpecExtras(target.specExtras as Map)
     }
 
     private PodOptions createPodOptions( value ) {

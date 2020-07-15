@@ -425,6 +425,31 @@ class PodOptionsTest extends Specification {
         opts.getSecurityContext().toSpec() == ctx
     }
 
+    def 'should create extra pod specs' () {
+        when:
+        def ctx = [hostPID: true, privileged: true]
+        def expected = new PodSpecExtras(ctx)
+        def opts = new PodOptions([ [specExtras: ctx] ])
+
+        then:
+        opts.getSpecExtras() == expected
+        opts.getSpecExtras().toSpec() == ctx
+
+        when:
+        opts = new PodOptions([ [specExtras: ctx] ]) + new PodOptions()
+
+        then:
+        opts.getSpecExtras() == expected
+        opts.getSpecExtras().toSpec() == ctx
+
+        when:
+        opts = new PodOptions() + new PodOptions([ [specExtras: ctx] ])
+
+        then:
+        opts.getSpecExtras() == expected
+        opts.getSpecExtras().toSpec() == ctx
+    }
+
     def 'should create pod node select' () {
         when:
         def opts = new PodOptions([ [nodeSelector: 'foo=1, bar=true, baz=Z'] ])

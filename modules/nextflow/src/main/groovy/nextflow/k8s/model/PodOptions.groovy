@@ -20,6 +20,7 @@ import groovy.transform.CompileStatic
 import groovy.transform.EqualsAndHashCode
 import groovy.transform.PackageScope
 import groovy.transform.ToString
+import groovy.util.logging.Slf4j
 
 /**
  * Model K8s pod options such as environment variables,
@@ -30,6 +31,7 @@ import groovy.transform.ToString
 @CompileStatic
 @ToString(includeNames = true)
 @EqualsAndHashCode(includeFields = true)
+@Slf4j
 class PodOptions {
 
     private String imagePullPolicy
@@ -52,6 +54,8 @@ class PodOptions {
 
     private PodSecurityContext securityContext
 
+    private PodSpecExtras specExtras
+
     PodOptions( List<Map> options=null ) {
         int size = options ? options.size() : 0
         envVars = new HashSet<>(size)
@@ -69,6 +73,9 @@ class PodOptions {
     }
 
     @PackageScope void create(Map<String,String> entry) {
+        String me = entry.toString()
+        log.info "create spec entry:  $me"
+
         if( entry.env && entry.value ) {
             envVars << PodEnv.value(entry.env, entry.value)
         }
@@ -108,6 +115,11 @@ class PodOptions {
         else if( entry.annotation && entry.value ) {
             this.annotations.put(entry.annotation as String, entry.value as String)
         }
+        else if( entry.specExtras instanceof Map ) {
+            log.info "got spec extras"
+            this.specExtras = new PodSpecExtras(entry.specExtras as Map)
+            log.info this.specExtras.toString()
+        }
         else 
             throw new IllegalArgumentException("Unknown pod options: $entry")
     }
@@ -127,6 +139,8 @@ class PodOptions {
 
     PodSecurityContext getSecurityContext() { securityContext }
 
+    PodSpecExtras getSpecExtras() { specExtras }
+
     PodNodeSelector getNodeSelector() { nodeSelector }
 
     PodOptions setNodeSelector( PodNodeSelector sel ) {
@@ -136,6 +150,11 @@ class PodOptions {
 
     PodOptions setSecurityContext( PodSecurityContext ctx ) {
         this.securityContext = ctx
+        return this
+    }
+
+    PodOptions setSpecExtras( PodSpecExtras ctx ) {
+        this.specExtras = ctx
         return this
     }
 
@@ -176,6 +195,12 @@ class PodOptions {
             result.securityContext = other.securityContext
         else
             result.securityContext = securityContext
+
+        // spec extras
+        if( other.specExtras )
+            result.specExtras = other.specExtras
+        else
+            result.specExtras = specExtras
 
         // node select
         result.nodeSelector = other.nodeSelector ?: this.nodeSelector

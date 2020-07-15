@@ -20,6 +20,7 @@ import nextflow.Const
 import nextflow.k8s.client.ClientConfig
 import nextflow.k8s.model.PodEnv
 import nextflow.k8s.model.PodSecurityContext
+import nextflow.k8s.model.PodSpecExtras
 import nextflow.k8s.model.PodVolumeClaim
 import spock.lang.Specification
 /**
@@ -326,6 +327,19 @@ class K8sConfigTest extends Specification {
         cfg = new K8sConfig( securityContext: ctx )
         then:
         cfg.getPodOptions().getSecurityContext() == new PodSecurityContext(ctx)
+
+    }
+
+    def 'should set the pod spec extras'( ) {
+
+        given:
+        def ctx = [hostPID: true, terminationGracePeriodSeconds: 0]
+
+        when:
+        def cfg = new K8sConfig( specExtras: ctx )
+
+        then:
+        cfg.getPodOptions().getSpecExtras() == new PodSpecExtras(ctx)
 
     }
 
