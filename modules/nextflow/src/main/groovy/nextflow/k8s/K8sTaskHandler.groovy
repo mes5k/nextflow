@@ -315,7 +315,6 @@ class K8sTaskHandler extends TaskHandler {
         if( !podName ) throw new IllegalStateException("Missing K8s pod name - cannot check if complete")
         def state = getState()
         if( state && state.terminated ) {
-            updateStartTime(state.terminated as Map)
             // finalize the task
             task.exitStatus = readExitFile()
             task.stdout = outputFile
