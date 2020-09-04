@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -274,6 +275,45 @@ class ConfigBuilderTest extends Specification {
         config.process.disk == '1TB'
         config.process.resources.foo == 1
         config.process.resources.bar == 2
+
+        cleanup:
+        folder?.deleteDir()
+    }
+
+
+    def 'should fetch the config path from env var' () {
+        given:
+        def folder = File.createTempDir()
+        def configMain = new File(folder,'my.config').absoluteFile
+
+
+        configMain.text = """
+        process.name = 'alpha'
+        params.one = 'a'
+        params.two = 'b'
+        """
+
+        // relative path to current dir
+        when:
+        def config = new ConfigBuilder(env: [NXF_CONFIG_FILE: 'my.config']) .setCurrentDir(folder.toPath()) .build()
+        then:
+        config.params.one == 'a'
+        config.params.two == 'b'
+        config.process.name == 'alpha'
+
+        // absolute path
+        when:
+        config = new ConfigBuilder(env: [NXF_CONFIG_FILE: configMain.toString()]) .build()
+        then:
+        config.params.one == 'a'
+        config.params.two == 'b'
+        config.process.name == 'alpha'
+
+        // default should not find it
+        when:
+        config = new ConfigBuilder() .build()
+        then:
+        config.params == [:]
 
         cleanup:
         folder?.deleteDir()

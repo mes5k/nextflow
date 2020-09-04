@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -453,7 +454,7 @@ class K8sTaskHandlerTest extends Specification {
         result = handler.checkIfCompleted()
         then:
         1 * handler.getState() >> fullState
-        1 * handler.updateStartTime(termState)
+        1 * handler.updateTimestamps(termState)
         1 * handler.readExitFile() >> EXIT_STATUS
         1 * handler.deletePodIfSuccessful(task) >> null
         1 * handler.savePodLogOnError(task) >> null
@@ -462,6 +463,7 @@ class K8sTaskHandlerTest extends Specification {
         handler.task.@stderr == ERR_FILE
         handler.status == TaskStatus.COMPLETED
         handler.startTimeMillis == 1515838176000
+        handler.completeTimeMillis == 1515838776000
         result == true
 
     }
@@ -729,46 +731,55 @@ class K8sTaskHandlerTest extends Specification {
         opts == new PodOptions([[env:'HELLO', value:'WORLD'], [env:'BRAVO', value:'HOTEL']])
     }
 
-    def 'should update startTimeMillis when zero' () {
+    def 'should update startTimeMillis and completeTimeMillis with terminated state' () {
 
         given:
         def handler = Spy(K8sTaskHandler)
-        def termState = [ startedAt: "2018-01-13T10:09:36Z" ]
+        def termState = [ startedAt: "2018-01-13T10:09:36Z",
+                          finishedAt: "2018-01-13T10:19:36Z" ]
 
         when:
-        handler.updateStartTime(termState)
+        handler.updateTimestamps(termState)
         then:
         handler.startTimeMillis == 1515838176000
+        handler.completeTimeMillis == 1515838776000
     }
 
-    def 'should not update startTimeMillis when non-zero' () {
+    def 'should update timestamps with current time with missing or malformed time' () {
+
+        given:
+        def handler = Spy(K8sTaskHandler)
+        def malformedTime = [ startedAt: "2018-01-13 10:09:36",
+                              finishedAt: "2018-01-13T10:19:36Z" ]
+
+        def garbage = [ what: "nope" ]
+
+        when:
+        handler.updateTimestamps(malformedTime)
+        then:
+        handler.startTimeMillis > 0 // confirms that timestamps have been updated
+        handler.startTimeMillis <= handler.completeTimeMillis // confirms that order is sane
+
+        when:
+        handler.updateTimestamps(garbage)
+        then:
+        handler.startTimeMillis > 0
+        handler.startTimeMillis <= handler.completeTimeMillis
+    }
+
+    def 'should not update timestamps with malformed time and when startTimeMillis already set' () {
 
         given:
         def handler = Spy(K8sTaskHandler)
         handler.startTimeMillis = 10
-        def termState = [ startedAt: "2018-01-13T10:09:36Z" ]
+        handler.completeTimeMillis = 20
+        def malformedTime = [ startedAt: "2018-01-13 10:09:36",
+                              finishedAt: "2018-01-13T10:19:36Z" ]
 
         when:
-        handler.updateStartTime(termState)
+        handler.updateTimestamps(malformedTime)
         then:
         handler.startTimeMillis == 10
-    }
-
-    def 'should not update startTimeMillis with missing or malformed time' () {
-
-        given:
-        def handler = Spy(K8sTaskHandler)
-        def malformedTime = [ startedAt: "2018-01-13 10:09:36" ]
-        def garbage = [ what: "nope" ]
-
-        when:
-        handler.updateStartTime(malformedTime)
-        then:
-        handler.startTimeMillis == 0
-
-        when:
-        handler.updateStartTime(garbage)
-        then:
-        handler.startTimeMillis == 0
+        handler.completeTimeMillis == 20
     }
 }

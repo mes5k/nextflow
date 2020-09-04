@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -138,7 +139,7 @@ class AwsBatchScriptLauncherTest extends Specification {
                     unset IFS
                 }
                 
-                '''.stripIndent()
+                '''.stripIndent(true)
     }
 
     def 'should create task environment' () {
@@ -311,7 +312,7 @@ class AwsBatchScriptLauncherTest extends Specification {
                         unset IFS
                     }
                     
-                    '''.stripIndent()
+                    '''.stripIndent(true)
 
     }
 
@@ -453,7 +454,7 @@ class AwsBatchScriptLauncherTest extends Specification {
                         unset IFS
                     }
                     
-                    '''.stripIndent()
+                    '''.stripIndent(true)
 
     }
 

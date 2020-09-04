@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -514,6 +515,11 @@ class BashWrapperBuilder {
         if( containerOptions ) {
             builder.addRunOptions(containerOptions)
         }
+
+        // The current work directory should be mounted only when
+        // the task is executed in a temporary scratch directory (ie changeDir != null)
+        // Applying this strategy only to podman for now. See https://github.com/nextflow-io/nextflow/issues/1710
+        builder.addMountWorkDir( engine!='podman' || changeDir )
 
         builder.build()
         return builder

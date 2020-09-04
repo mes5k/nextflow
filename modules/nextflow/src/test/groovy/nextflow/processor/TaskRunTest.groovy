@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -779,7 +780,7 @@ class TaskRunTest extends Specification {
         given:
         def task = new TaskRun()
         task.processor = new TaskProcessor()
-        task.context = Mock(TaskContext)
+        task.context = GroovyMock(TaskContext)
 
         when:
         task.resolve(new BodyDef({-> "Hello ${x}"}, 'Hello ${x}', 'script'))

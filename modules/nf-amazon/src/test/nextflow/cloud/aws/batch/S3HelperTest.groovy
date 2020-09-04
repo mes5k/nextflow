@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -116,7 +117,7 @@ class S3HelperTest extends Specification {
                         unset IFS
                     }
                     '''
-                    .stripIndent()
+                    .stripIndent(true)
     }
 
     def 'should set storage class and encryption' () {
@@ -212,7 +213,7 @@ class S3HelperTest extends Specification {
                         unset IFS
                     }
                     '''
-                .stripIndent()
+                .stripIndent(true)
 
     }
 }

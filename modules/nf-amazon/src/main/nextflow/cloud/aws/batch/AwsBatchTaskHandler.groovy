@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -125,6 +126,7 @@ class AwsBatchTaskHandler extends TaskHandler implements BatchHandler<String,Job
         this.traceFile = task.workDir.resolve(TaskRun.CMD_TRACE)
     }
 
+    protected String getJobId() { jobId }
 
     /**
      * @return An instance of {@link AwsOptions} holding Batch specific settings

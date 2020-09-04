@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -187,7 +188,7 @@ class AwsBatchFileCopyStrategyTest extends Specification {
                         )
                         unset IFS
                     }
-                    '''.stripIndent()
+                    '''.stripIndent(true)
 
         when:
         script = copy.getBeforeStartScript()
@@ -275,7 +276,7 @@ class AwsBatchFileCopyStrategyTest extends Specification {
                     )
                     unset IFS
                 }
-            '''.stripIndent()
+            '''.stripIndent(true)
     }
 
     def 'should return env variables' () {

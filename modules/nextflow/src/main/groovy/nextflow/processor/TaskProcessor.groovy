@@ -1,4 +1,5 @@
 /*
+ * Copyright 2020, Seqera Labs
  * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -336,7 +337,7 @@ class TaskProcessor {
 
     int getMaxForks() { maxForks }
 
-    protected void checkWarn(String msg, Map opts) {
+    protected void checkWarn(String msg, Map opts=null) {
         if( NF.isStrictMode() )
             throw new ProcessUnrecoverableException(msg)
         if( opts )
@@ -631,7 +632,7 @@ class TaskProcessor {
         assert script != null
 
         def result = new StringBuilder()
-        result << script.stripIndent().trim()
+        result << script.stripIndent(true).trim()
         result << '\n'
 
         if( result[0] != '#' || result[1] != '!') {
@@ -1078,7 +1079,7 @@ class TaskProcessor {
 
         if( error.source )  {
             message << "\nWhen block:"
-            error.source.stripIndent().eachLine {
+            error.source.stripIndent(true).eachLine {
                 message << "  $it"
             }
         }
@@ -1100,7 +1101,7 @@ class TaskProcessor {
         if( task?.script ) {
             // - print the executed command
             message << "Command executed${task.template ? " [$task.template]": ''}:\n"
-            task.script?.stripIndent()?.trim()?.eachLine {
+            task.script?.stripIndent(true)?.trim()?.eachLine {
                 message << "  ${it}"
             }
 
@@ -1141,7 +1142,7 @@ class TaskProcessor {
         else {
             if( task?.source )  {
                 message << "Source block:"
-                task.source.stripIndent().eachLine {
+                task.source.stripIndent(true).eachLine {
                     message << "  $it"
                 }
             }
@@ -1924,11 +1925,11 @@ class TaskProcessor {
 
         List keys = [ session.uniqueId, name, task.source ]
 
-        if( task.containerEnabled )
+        if( task.isContainerEnabled() )
             keys << task.container
 
         // add all the input name-value pairs to the key generator
-        task.inputs.each {
+        for( Map.Entry<InParam,Object> it : task.inputs ) {
             keys.add( it.key.name )
             keys.add( it.value )
         }
