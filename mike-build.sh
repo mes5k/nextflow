@@ -1,3 +1,6 @@
+#!/bin/bash
+
+set -e
 
 make compile
 make pack

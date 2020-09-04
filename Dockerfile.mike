@@ -8,7 +8,7 @@ RUN apt-get update && \
     openjdk-11-jdk \
     curl
 
-COPY build/releases/nextflow-20.07.0-RC1-all /usr/local/bin/nextflow
+COPY build/releases/nextflow-20.09.0-SNAPSHOT-all /usr/local/bin/nextflow
 COPY ca.illumina.goskope.com.cer /tmp/ca.illumina.goskope.com.cer
 
 RUN echo yes | keytool -import -alias example -keystore /etc/ssl/certs/java/cacerts -storepass changeit -file /tmp/ca.illumina.goskope.com.cer
