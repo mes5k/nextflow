@@ -1,0 +1,14 @@
+FROM ubuntu:19.10
+
+RUN apt-get update && \
+    apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-setuptools \
+    openjdk-11-jdk \
+    curl
+
+COPY build/releases/nextflow-20.07.0-RC1-all /usr/local/bin/nextflow
+COPY ca.illumina.goskope.com.cer /tmp/ca.illumina.goskope.com.cer
+
+RUN echo yes | keytool -import -alias example -keystore /etc/ssl/certs/java/cacerts -storepass changeit -file /tmp/ca.illumina.goskope.com.cer
